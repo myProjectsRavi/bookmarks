@@ -1230,70 +1230,116 @@ function App() {
         </form>
       </Modal>
 
-      {/* Add/Edit Note Modal */}
+      {/* Add/Edit Note Modal - Premium Rich Editor */}
       <Modal
         isOpen={modalType === 'ADD_NOTE' || modalType === 'EDIT_NOTE'}
         onClose={() => setModalType(null)}
-        title={modalType === 'EDIT_NOTE' ? 'Edit Note' : 'Create New Note'}
+        title={modalType === 'EDIT_NOTE' ? '✏️ Edit Note' : '📝 Create New Note'}
+        size="lg"
       >
-        <form onSubmit={handleSaveNote} className="space-y-4">
+        <form onSubmit={handleSaveNote} className="space-y-5">
+          {/* Title with premium styling */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Title *</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Title
+            </label>
             <input
               type="text"
               required
               autoFocus
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all"
-              placeholder="Note title..."
+              className="w-full px-4 py-3 text-lg font-medium border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 outline-none transition-all bg-slate-50/50"
+              placeholder="Give your note a title..."
               value={newNoteTitle}
               onChange={(e) => setNewNoteTitle(e.target.value)}
             />
           </div>
+
+          {/* Rich Content Area */}
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Content *</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Content
+            </label>
+            {/* Rich Text Toolbar Placeholder */}
+            <div className="flex items-center gap-1 p-2 bg-slate-100 rounded-t-xl border-2 border-b-0 border-slate-200">
+              <button type="button" className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 font-bold" title="Bold">B</button>
+              <button type="button" className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 italic" title="Italic">I</button>
+              <button type="button" className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 underline" title="Underline">U</button>
+              <div className="w-px h-5 bg-slate-300 mx-1"></div>
+              <button type="button" className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 text-sm" title="Heading">H1</button>
+              <button type="button" className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 text-sm" title="List">• List</button>
+              <div className="w-px h-5 bg-slate-300 mx-1"></div>
+              <button type="button" className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 text-sm" title="Code">{`</>`}</button>
+              <button type="button" className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 text-sm" title="Link">🔗</button>
+            </div>
             <textarea
               required
-              rows={6}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all resize-none"
-              placeholder="Write your note here..."
+              rows={12}
+              className="w-full px-4 py-4 text-base border-2 border-t-0 border-slate-200 rounded-b-xl focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 outline-none transition-all resize-none font-mono leading-relaxed"
+              placeholder="Write your note here...
+
+You can write:
+• Meeting notes
+• Ideas & thoughts
+• Code snippets
+• Daily journal entries
+
+Start typing to capture your ideas..."
               value={newNoteContent}
               onChange={(e) => setNewNoteContent(e.target.value)}
             />
+            <p className="text-xs text-slate-400 mt-1 text-right">
+              {newNoteContent.length} characters
+            </p>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Notebook</label>
-            <select
-              value={selectedNotebookForAdd}
-              onChange={(e) => setSelectedNotebookForAdd(e.target.value)}
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all bg-white"
-            >
-              {notebooks.map(nb => (
-                <option key={nb.id} value={nb.id}>{nb.name}</option>
-              ))}
-            </select>
+
+          {/* Two column layout for Notebook & Tags */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                📓 Notebook
+              </label>
+              <select
+                value={selectedNotebookForAdd}
+                onChange={(e) => setSelectedNotebookForAdd(e.target.value)}
+                className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 outline-none transition-all bg-white"
+              >
+                {notebooks.map(nb => (
+                  <option key={nb.id} value={nb.id}>{nb.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
+                🏷️ Tags
+              </label>
+              <TagInput
+                tags={newNoteTags}
+                onTagsChange={setNewNoteTags}
+                placeholder="Add tags..."
+              />
+            </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Tags (Optional)</label>
-            <TagInput
-              tags={newNoteTags}
-              onTagsChange={setNewNoteTags}
-              placeholder="Add tags..."
-            />
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={() => setModalType(null)}
-              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-lg shadow-sm transition-colors"
-            >
-              {modalType === 'EDIT_NOTE' ? 'Update Note' : 'Create Note'}
-            </button>
+
+          {/* Action Buttons */}
+          <div className="flex items-center justify-between pt-4 border-t border-slate-100">
+            <p className="text-xs text-slate-400">
+              💡 Tip: Use tags to organize and find notes quickly
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setModalType(null)}
+                className="px-6 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="px-6 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-xl shadow-lg shadow-purple-200 transition-all active:scale-95"
+              >
+                {modalType === 'EDIT_NOTE' ? '✓ Update Note' : '+ Create Note'}
+              </button>
+            </div>
           </div>
         </form>
       </Modal>
@@ -1302,7 +1348,8 @@ function App() {
       <Modal
         isOpen={modalType === 'NOTEBOOK_SYNC'}
         onClose={() => setModalType(null)}
-        title="Sync Notebooks"
+        title="🔄 Sync Notebooks"
+        size="lg"
       >
         <NotebookSync
           notebooks={notebooks}
