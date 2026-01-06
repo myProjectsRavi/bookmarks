@@ -1,10 +1,10 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Folder as FolderIcon, Layers, Plus, FolderOpen, Trash2, Download,
   UploadCloud, Database, Bookmark, Activity, FileUp, Zap,
-  Copy, Sparkles, Smartphone, FileText, BookOpen
+  Copy, Sparkles, Smartphone, FileText, BookOpen, Network, ChevronDown, ChevronRight, Crown
 } from 'lucide-react';
-import { Folder, Notebook } from '../types';
+import { Folder, Notebook, MainView } from '../types';
 
 interface SidebarProps {
   folders: Folder[];
@@ -23,6 +23,7 @@ interface SidebarProps {
   // Premium features
   onShowDeduplication?: () => void;
   onShowSync?: () => void;
+  onShowPremium?: () => void;
   isPremium?: boolean;
   // Notes features
   notebooks?: Notebook[];
@@ -32,6 +33,10 @@ interface SidebarProps {
   onAddNotebook?: () => void;
   onDeleteNotebook?: (id: string) => void;
   onShowNotebookSync?: () => void;
+  // New: Main view navigation
+  mainView?: MainView;
+  onChangeView?: (view: MainView) => void;
+  trashCount?: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -51,6 +56,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Premium
   onShowDeduplication,
   onShowSync,
+  onShowPremium,
   isPremium = true,
   // Notes
   notebooks = [],
@@ -60,10 +66,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onAddNotebook,
   onDeleteNotebook,
   onShowNotebookSync,
+  // New view navigation
+  mainView = 'bookmarks',
+  onChangeView,
+  trashCount = 0,
 }) => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const browserImportRef = useRef<HTMLInputElement>(null);
+
+  // Collapsible sections
+  const [foldersOpen, setFoldersOpen] = useState(true);
+  const [notebooksOpen, setNotebooksOpen] = useState(true);
+  const [actionsOpen, setActionsOpen] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -179,38 +194,78 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <ul className="space-y-1">
             <li>
               <button
-                onClick={() => onSelectFolder('ALL')}
-                className={`w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-lg transition-colors duration-200 group ${activeFolderId === 'ALL'
+                onClick={() => { onSelectFolder('ALL'); onChangeView?.('bookmarks'); }}
+                className={`w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-lg transition-colors duration-200 group ${mainView === 'bookmarks' && activeFolderId === 'ALL'
                   ? 'bg-indigo-500/10 text-indigo-400 font-medium'
                   : 'hover:bg-slate-800/50 hover:text-white'
                   }`}
               >
                 <div className="flex items-center gap-3">
-                  <Layers size={18} className={activeFolderId === 'ALL' ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-400'} />
+                  <Layers size={18} className={mainView === 'bookmarks' && activeFolderId === 'ALL' ? 'text-indigo-400' : 'text-slate-500 group-hover:text-slate-400'} />
                   <span>All Bookmarks</span>
                 </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${activeFolderId === 'ALL' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-800 text-slate-500'}`}>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${mainView === 'bookmarks' && activeFolderId === 'ALL' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-800 text-slate-500'}`}>
                   {bookmarkCounts['ALL'] || 0}
                 </span>
               </button>
             </li>
-            {/* All Notes - below All Bookmarks */}
+            {/* All Notes */}
             {onSelectNotebook && (
               <li>
                 <button
-                  onClick={() => onSelectNotebook('ALL_NOTES')}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-lg transition-colors duration-200 group ${activeNotebookId === 'ALL_NOTES'
+                  onClick={() => { onSelectNotebook('ALL_NOTES'); onChangeView?.('notes'); }}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-lg transition-colors duration-200 group ${mainView === 'notes'
                     ? 'bg-purple-500/10 text-purple-400 font-medium'
                     : 'hover:bg-slate-800/50 hover:text-white'
                     }`}
                 >
                   <div className="flex items-center gap-3">
-                    <FileText size={18} className={activeNotebookId === 'ALL_NOTES' ? 'text-purple-400' : 'text-slate-500 group-hover:text-slate-400'} />
+                    <FileText size={18} className={mainView === 'notes' ? 'text-purple-400' : 'text-slate-500 group-hover:text-slate-400'} />
                     <span>All Notes</span>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${activeNotebookId === 'ALL_NOTES' ? 'bg-purple-500/20 text-purple-300' : 'bg-slate-800 text-slate-500'}`}>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${mainView === 'notes' ? 'bg-purple-500/20 text-purple-300' : 'bg-slate-800 text-slate-500'}`}>
                     {noteCounts['ALL_NOTES'] || 0}
                   </span>
+                </button>
+              </li>
+            )}
+            {/* Knowledge Graph */}
+            {onChangeView && (
+              <li>
+                <button
+                  onClick={() => onChangeView('graph')}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-lg transition-colors duration-200 group ${mainView === 'graph'
+                    ? 'bg-emerald-500/10 text-emerald-400 font-medium'
+                    : 'hover:bg-slate-800/50 hover:text-white'
+                    }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Network size={18} className={mainView === 'graph' ? 'text-emerald-400' : 'text-slate-500 group-hover:text-slate-400'} />
+                    <span>Knowledge Graph</span>
+                  </div>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 font-medium">PRO</span>
+                </button>
+              </li>
+            )}
+            {/* Trash */}
+            {onChangeView && (
+              <li>
+                <button
+                  onClick={() => onChangeView('trash')}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-lg transition-colors duration-200 group ${mainView === 'trash'
+                    ? 'bg-red-500/10 text-red-400 font-medium'
+                    : 'hover:bg-slate-800/50 hover:text-white'
+                    }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Trash2 size={18} className={mainView === 'trash' ? 'text-red-400' : 'text-slate-500 group-hover:text-slate-400'} />
+                    <span>Trash</span>
+                  </div>
+                  {trashCount > 0 && (
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${mainView === 'trash' ? 'bg-red-500/20 text-red-300' : 'bg-slate-800 text-slate-500'}`}>
+                      {trashCount}
+                    </span>
+                  )}
                 </button>
               </li>
             )}

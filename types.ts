@@ -28,6 +28,15 @@ export interface Notebook {
   createdAt: number;
 }
 
+// Version history for notes
+export interface NoteVersion {
+  id: string;
+  title: string;
+  content: string;
+  timestamp: number;
+  changeType: 'created' | 'edited' | 'restored';
+}
+
 export interface Note {
   id: string;
   notebookId: string;
@@ -36,6 +45,40 @@ export interface Note {
   tags?: string[];
   createdAt: number;
   updatedAt?: number;
+  versions?: NoteVersion[];  // Last 10 versions for history
+}
+
+// Trash bin item
+export interface TrashedItem {
+  id: string;
+  type: 'bookmark' | 'note' | 'folder' | 'notebook';
+  item: Bookmark | Note | Folder | Notebook;
+  deletedAt: number;
+  autoDeleteAt: number;  // 30 days after deletedAt
+  originalLocation?: string;  // For restoring to correct folder/notebook
+}
+
+// Knowledge Graph types
+export interface GraphNode {
+  id: string;
+  type: 'bookmark' | 'note' | 'tag' | 'domain';
+  label: string;
+  size: number;
+  color?: string;
+  x?: number;
+  y?: number;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  weight: number;
+  type: 'has_tag' | 'same_domain' | 'tag_cooccur' | 'linked';
+}
+
+export interface KnowledgeGraphData {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
 }
 
 export type ModalType =
@@ -53,6 +96,7 @@ export type ModalType =
   | 'QR_SYNC'
   | 'CLEANUP_WIZARD'
   | 'PREMIUM_UPGRADE'
+  | 'VERSION_HISTORY'
   // Notes modals
   | 'ADD_NOTE'
   | 'EDIT_NOTE'
@@ -63,10 +107,14 @@ export type ModalType =
   | 'UNLOCK_NOTE'
   | null;
 
+// Main view types
+export type MainView = 'bookmarks' | 'notes' | 'graph' | 'trash';
+
 export interface ViewState {
   activeFolderId: string | 'ALL';
   searchQuery: string;
   isSidebarOpen: boolean;
+  mainView: MainView;
 }
 
 // For tag filtering
@@ -75,17 +123,21 @@ export interface TagFilter {
   active: boolean;
 }
 
-// Premium feature flags
+// Premium feature flags - Updated for new features
 export interface PremiumFeatures {
   eternalVault: boolean;      // Page snapshots
   deduplication: boolean;     // Fuzzy duplicate finder
   qrSync: boolean;            // Multi-device sync via QR
+  versionHistory: boolean;    // Note version history
+  trashBin: boolean;          // 30-day trash recovery
+  knowledgeGraph: boolean;    // Visual knowledge map
+  syncDevices: boolean;       // Cloud sync (future)
 }
 
-// Premium subscription status
+// Premium subscription status - Simplified to Free/Pro
 export interface PremiumStatus {
-  isActive: boolean;
-  plan?: 'monthly' | 'yearly';
+  isPro: boolean;
+  plan?: 'monthly' | 'lifetime';
   expiresAt?: number;
   features: PremiumFeatures;
 }

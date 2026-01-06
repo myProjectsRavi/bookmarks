@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, Plus, Menu, LogOut, UploadCloud, AlertTriangle, Tag, Download, Loader, FileText, Lock } from 'lucide-react';
-import { Folder, Bookmark, ModalType, Notebook, Note } from './types';
+import { Search, Plus, Menu, LogOut, UploadCloud, AlertTriangle, Tag, Download, Loader, FileText, Lock, Crown } from 'lucide-react';
+import { Folder, Bookmark, ModalType, Notebook, Note, MainView, TrashedItem, NoteVersion } from './types';
 import { Sidebar } from './components/Sidebar';
 import { BookmarkGrid } from './components/BookmarkGrid';
 import { NotesGrid } from './components/NotesGrid';
@@ -17,6 +17,10 @@ import { SecureNoteShare } from './components/SecureNoteShare';
 import { NoteViewer } from './components/NoteViewer';
 import { UnlockNote } from './components/UnlockNote';
 import { NotebookSync } from './components/NotebookSync';
+import { TrashView } from './components/TrashView';
+import { VersionHistory } from './components/VersionHistory';
+import { KnowledgeGraph } from './components/KnowledgeGraph';
+import { PremiumModal } from './components/PremiumModal';
 import { parseImportFile } from './utils/importers';
 import { fetchUrlMetadata } from './utils/metadata';
 import { checkMultipleLinks } from './utils/linkChecker';
@@ -91,6 +95,13 @@ function App() {
   const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [viewingNote, setViewingNote] = useState<Note | null>(null);
+  const [historyNote, setHistoryNote] = useState<Note | null>(null);  // For version history
+
+  // Main view navigation
+  const [mainView, setMainView] = useState<MainView>('bookmarks');
+
+  // Trash bin state
+  const [trash, setTrash] = useState<TrashedItem[]>([]);
 
   // Import State
   const [pendingImportData, setPendingImportData] = useState<{ folders: Folder[], bookmarks: Bookmark[] } | null>(null);
@@ -557,20 +568,41 @@ function App() {
 
     const now = Date.now();
     if (modalType === 'EDIT_NOTE' && editingNoteId) {
-      // Edit existing
-      const updatedNote: Note = {
-        id: editingNoteId,
-        notebookId,
+      // Edit existing - save previous version to history
+      const existingNote = notes.find(n => n.id === editingNoteId);
+      if (existingNote) {
+        const newVersion: NoteVersion = {
+          id: `v_${now}`,
+          title: existingNote.title,
+          content: existingNote.content,
+          timestamp: existingNote.updatedAt || existingNote.createdAt,
+          changeType: 'edited'
+        };
+        // Keep only last 10 versions
+        const updatedVersions = [...(existingNote.versions || []), newVersion].slice(-10);
+
+        const updatedNote: Note = {
+          id: editingNoteId,
+          notebookId,
+          title: newNoteTitle.trim(),
+          content: newNoteContent.trim(),
+          tags: newNoteTags,
+          createdAt: existingNote.createdAt,
+          updatedAt: now,
+          versions: updatedVersions
+        };
+        setNotes(notes.map(n => n.id === editingNoteId ? updatedNote : n));
+        showToast('Note updated', 'success');
+      }
+    } else {
+      // Create new - add initial version
+      const initialVersion: NoteVersion = {
+        id: `v_${now}`,
         title: newNoteTitle.trim(),
         content: newNoteContent.trim(),
-        tags: newNoteTags,
-        createdAt: notes.find(n => n.id === editingNoteId)?.createdAt || now,
-        updatedAt: now
+        timestamp: now,
+        changeType: 'created'
       };
-      setNotes(notes.map(n => n.id === editingNoteId ? updatedNote : n));
-      showToast('Note updated', 'success');
-    } else {
-      // Create new
       const newNote: Note = {
         id: generateId(),
         notebookId,
@@ -578,7 +610,8 @@ function App() {
         content: newNoteContent.trim(),
         tags: newNoteTags,
         createdAt: now,
-        updatedAt: now
+        updatedAt: now,
+        versions: [initialVersion]
       };
       setNotes([newNote, ...notes]);
       showToast('Note added', 'success');
@@ -592,17 +625,114 @@ function App() {
     setNewNoteTags([]);
   };
 
+  // Restore a note version
+  const restoreNoteVersion = (version: NoteVersion) => {
+    if (!historyNote) return;
+
+    // Save current as a version
+    const currentVersion: NoteVersion = {
+      id: `v_${Date.now()}`,
+      title: historyNote.title,
+      content: historyNote.content,
+      timestamp: Date.now(),
+      changeType: 'restored'
+    };
+
+    const updatedVersions = [...(historyNote.versions || []), currentVersion].slice(-10);
+
+    const restoredNote: Note = {
+      ...historyNote,
+      title: version.title,
+      content: version.content,
+      updatedAt: Date.now(),
+      versions: updatedVersions
+    };
+
+    setNotes(notes.map(n => n.id === historyNote.id ? restoredNote : n));
+    setHistoryNote(null);
+    setModalType(null);
+    showToast('Version restored', 'success');
+  };
+
   const deleteNotebook = (id: string) => {
+    const notebook = notebooks.find(n => n.id === id);
+    if (notebook) {
+      // Move notebook and its notes to trash
+      const notebookNotes = notes.filter(n => n.notebookId === id);
+      const trashedItems: TrashedItem[] = [
+        {
+          id: `trash_${Date.now()}_notebook`,
+          type: 'notebook',
+          item: notebook,
+          deletedAt: Date.now(),
+          autoDeleteAt: Date.now() + (30 * 24 * 60 * 60 * 1000),
+        },
+        ...notebookNotes.map((note, i) => ({
+          id: `trash_${Date.now()}_note_${i}`,
+          type: 'note' as const,
+          item: note,
+          deletedAt: Date.now(),
+          autoDeleteAt: Date.now() + (30 * 24 * 60 * 60 * 1000),
+        }))
+      ];
+      setTrash([...trash, ...trashedItems]);
+    }
     setNotebooks(notebooks.filter(n => n.id !== id));
     setNotes(notes.filter(n => n.notebookId !== id));
     if (activeNotebookId === id) setActiveNotebookId('ALL_NOTES');
-    showToast('Notebook deleted', 'success');
+    showToast('Notebook moved to trash', 'success');
   };
 
   const deleteNote = (id: string) => {
+    const note = notes.find(n => n.id === id);
+    if (note) {
+      const trashedItem: TrashedItem = {
+        id: `trash_${Date.now()}_note`,
+        type: 'note',
+        item: note,
+        deletedAt: Date.now(),
+        autoDeleteAt: Date.now() + (30 * 24 * 60 * 60 * 1000),
+        originalLocation: note.notebookId,
+      };
+      setTrash([...trash, trashedItem]);
+    }
     setNotes(notes.filter(n => n.id !== id));
-    showToast('Note deleted', 'success');
+    showToast('Note moved to trash', 'success');
   };
+
+  // Trash handlers
+  const restoreFromTrash = (item: TrashedItem) => {
+    if (item.type === 'note') {
+      setNotes([...notes, item.item as Note]);
+    } else if (item.type === 'bookmark') {
+      setBookmarks([...bookmarks, item.item as Bookmark]);
+    } else if (item.type === 'folder') {
+      setFolders([...folders, item.item as Folder]);
+    } else if (item.type === 'notebook') {
+      setNotebooks([...notebooks, item.item as Notebook]);
+    }
+    setTrash(trash.filter(t => t.id !== item.id));
+    showToast('Item restored', 'success');
+  };
+
+  const deleteFromTrashPermanently = (id: string) => {
+    setTrash(trash.filter(t => t.id !== id));
+    showToast('Permanently deleted', 'success');
+  };
+
+  const emptyTrash = () => {
+    setTrash([]);
+    showToast('Trash emptied', 'success');
+  };
+
+  // Auto-cleanup trash on load (30-day expiry)
+  useEffect(() => {
+    const now = Date.now();
+    const validTrash = trash.filter(item => item.autoDeleteAt > now);
+    if (validTrash.length !== trash.length) {
+      setTrash(validTrash);
+    }
+  }, []);
 
   // Export / Import Handlers
   const handleExport = () => {
@@ -832,7 +962,8 @@ function App() {
           activeFolderId={activeFolderId}
           onSelectFolder={(id) => {
             setActiveTag('');
-            setActiveNotebookId(null); // Clear notebook selection when selecting folder
+            setActiveNotebookId(null);
+            setMainView('bookmarks');
             if (!searchQuery.trim()) {
               setActiveFolderId(id);
             } else {
@@ -853,19 +984,24 @@ function App() {
           onClearTag={() => setActiveTag('')}
           onShowDeduplication={() => setModalType('DEDUPLICATION')}
           onShowSync={() => setModalType('QR_SYNC')}
+          onShowPremium={() => setModalType('PREMIUM_UPGRADE')}
           isPremium={true}
           notebooks={notebooks}
           noteCounts={noteCounts}
           activeNotebookId={activeNotebookId}
           onSelectNotebook={(id) => {
             setActiveTag('');
-            setActiveFolderId('ALL'); // Clear folder selection when selecting notebook
+            setActiveFolderId('ALL');
             setActiveNotebookId(id);
+            setMainView('notes');
             if (window.innerWidth < 768) setIsSidebarOpen(false);
           }}
           onAddNotebook={openNotebookModal}
           onDeleteNotebook={deleteNotebook}
           onShowNotebookSync={() => setModalType('NOTEBOOK_SYNC')}
+          mainView={mainView}
+          onChangeView={setMainView}
+          trashCount={trash.length}
         />
       </div>
 
@@ -953,30 +1089,57 @@ function App() {
         </header>
 
         {/* Content */}
-        <main className="flex-1 overflow-y-auto px-6 py-8">
-          <div className="max-w-7xl mx-auto">
-            {activeNotebookId ? (
-              <NotesGrid
-                notes={filteredNotes}
-                notebooks={notebooks}
-                onDeleteNote={deleteNote}
-                onEditNote={openEditNoteModal}
-                onViewNote={(note) => { setViewingNote(note); setModalType('VIEW_NOTE'); }}
-                onShareNote={(note) => { setViewingNote(note); setModalType('SHARE_NOTE'); }}
-                onTagClick={handleTagClick}
-                searchQuery={searchQuery}
-              />
-            ) : (
-              <BookmarkGrid
-                bookmarks={filteredBookmarks}
-                onDeleteBookmark={deleteBookmark}
-                onEditBookmark={openEditModal}
-                onTagClick={handleTagClick}
-                searchQuery={searchQuery}
-                folders={folders}
-              />
-            )}
-          </div>
+        <main className="flex-1 overflow-y-auto">
+          {mainView === 'graph' ? (
+            <KnowledgeGraph
+              bookmarks={bookmarks}
+              notes={notes}
+              onNodeClick={(node) => {
+                if (node.type === 'bookmark') {
+                  const bookmarkId = node.id.replace('bookmark_', '');
+                  const bookmark = bookmarks.find(b => b.id === bookmarkId);
+                  if (bookmark) openEditModal(bookmark);
+                } else if (node.type === 'note') {
+                  const noteId = node.id.replace('note_', '');
+                  const note = notes.find(n => n.id === noteId);
+                  if (note) { setViewingNote(note); setModalType('VIEW_NOTE'); }
+                }
+              }}
+            />
+          ) : mainView === 'trash' ? (
+            <TrashView
+              trash={trash}
+              onRestore={restoreFromTrash}
+              onDeletePermanently={deleteFromTrashPermanently}
+              onEmptyTrash={emptyTrash}
+            />
+          ) : (
+            <div className="px-6 py-8">
+              <div className="max-w-7xl mx-auto">
+                {mainView === 'notes' ? (
+                  <NotesGrid
+                    notes={filteredNotes}
+                    notebooks={notebooks}
+                    onDeleteNote={deleteNote}
+                    onEditNote={openEditNoteModal}
+                    onViewNote={(note) => { setViewingNote(note); setModalType('VIEW_NOTE'); }}
+                    onShareNote={(note) => { setViewingNote(note); setModalType('SHARE_NOTE'); }}
+                    onTagClick={handleTagClick}
+                    searchQuery={searchQuery}
+                  />
+                ) : (
+                  <BookmarkGrid
+                    bookmarks={filteredBookmarks}
+                    onDeleteBookmark={deleteBookmark}
+                    onEditBookmark={openEditModal}
+                    onTagClick={handleTagClick}
+                    searchQuery={searchQuery}
+                    folders={folders}
+                  />
+                )}
+              </div>
+            </div>
+          )}
         </main>
       </div>
 
@@ -1434,6 +1597,35 @@ function App() {
         size="md"
       >
         <UnlockNote onClose={() => setModalType(null)} />
+      </Modal>
+
+      {/* Version History Modal */}
+      {historyNote && (
+        <Modal
+          isOpen={modalType === 'VERSION_HISTORY'}
+          onClose={() => { setModalType(null); setHistoryNote(null); }}
+          title="📜 Version History"
+          size="lg"
+        >
+          <VersionHistory
+            note={historyNote}
+            onRestore={restoreNoteVersion}
+            onClose={() => { setModalType(null); setHistoryNote(null); }}
+          />
+        </Modal>
+      )}
+
+      {/* Premium Upgrade Modal */}
+      <Modal
+        isOpen={modalType === 'PREMIUM_UPGRADE'}
+        onClose={() => setModalType(null)}
+        title=""
+        size="lg"
+      >
+        <PremiumModal
+          currentPlan="free"
+          onClose={() => setModalType(null)}
+        />
       </Modal>
 
     </div>
