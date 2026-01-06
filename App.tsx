@@ -18,15 +18,18 @@ import {
   generateSalt,
   arrayToBase64,
   base64ToArray,
-  isEncryptionSupported
+  isEncryptionSupported,
+  createVerificationCanary,
+  verifyPinWithCanary
 } from './utils/crypto';
 
 // Helper to generate IDs
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
 // Storage keys
+// Storage keys - NOTE: PIN is NO LONGER stored! Only encrypted canary is stored.
 const STORAGE_KEYS = {
-  PIN: 'lh_pin',
+  CANARY: 'lh_canary',  // Encrypted verification string (NOT the PIN)
   SALT: 'lh_salt',
   FOLDERS: 'lh_folders',
   BOOKMARKS: 'lh_bookmarks',
@@ -34,9 +37,13 @@ const STORAGE_KEYS = {
   ENCRYPTED: 'lh_encrypted'
 };
 
+// Auto-lock timeout (5 minutes of inactivity)
+const AUTO_LOCK_TIMEOUT_MS = 5 * 60 * 1000;
+
 function App() {
   // --- Auth State ---
-  const [hasPin, setHasPin] = useState<boolean>(!!localStorage.getItem(STORAGE_KEYS.PIN));
+  // Check for CANARY (encrypted verification) instead of plain PIN
+  const [hasPin, setHasPin] = useState<boolean>(!!localStorage.getItem(STORAGE_KEYS.CANARY));
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(!!sessionStorage.getItem(STORAGE_KEYS.SESSION));
   const [cryptoKey, setCryptoKey] = useState<CryptoKey | null>(null);
 
@@ -219,46 +226,56 @@ function App() {
     setToast({ message, type });
   };
 
-  // Auth Handlers
+  // Auth Handlers - Using canary-based verification (never stores PIN)
   const handleUnlock = async (inputPin: string) => {
-    const storedPin = localStorage.getItem(STORAGE_KEYS.PIN);
-    if (inputPin === storedPin) {
-      sessionStorage.setItem(STORAGE_KEYS.SESSION, 'true');
-      setIsAuthenticated(true);
+    try {
+      const saltBase64 = localStorage.getItem(STORAGE_KEYS.SALT);
+      const encryptedCanary = localStorage.getItem(STORAGE_KEYS.CANARY);
 
-      // Derive encryption key
-      if (isEncryptionSupported()) {
-        const saltBase64 = localStorage.getItem(STORAGE_KEYS.SALT);
-        if (saltBase64) {
-          const salt = base64ToArray(saltBase64);
-          const key = await deriveKey(inputPin, salt);
-          setCryptoKey(key);
-          await loadData(key);
-        } else {
-          await loadData(null);
-        }
-      } else {
-        await loadData(null);
+      if (!saltBase64 || !encryptedCanary) {
+        return false;
       }
 
-      return true;
+      // Derive key from input PIN
+      const salt = base64ToArray(saltBase64);
+      const key = await deriveKey(inputPin, salt);
+
+      // Verify PIN by attempting to decrypt the canary
+      const isValid = await verifyPinWithCanary(encryptedCanary, key);
+
+      if (isValid) {
+        sessionStorage.setItem(STORAGE_KEYS.SESSION, 'true');
+        setIsAuthenticated(true);
+        setCryptoKey(key);
+        await loadData(key);
+        return true;
+      }
+
+      return false;
+    } catch (e) {
+      console.error('Unlock failed:', e);
+      return false;
     }
-    return false;
   };
 
   const handleSetupPin = async (newPin: string) => {
-    localStorage.setItem(STORAGE_KEYS.PIN, newPin);
+    // SECURITY: Never store the PIN itself!
+    // Instead, create an encrypted canary that can only be decrypted with correct PIN
+
+    const salt = generateSalt();
+    localStorage.setItem(STORAGE_KEYS.SALT, arrayToBase64(salt));
+
+    const key = await deriveKey(newPin, salt);
+
+    // Create and store encrypted canary (this proves correct PIN without storing it)
+    const encryptedCanary = await createVerificationCanary(key);
+    localStorage.setItem(STORAGE_KEYS.CANARY, encryptedCanary);
+
     setHasPin(true);
     sessionStorage.setItem(STORAGE_KEYS.SESSION, 'true');
     setIsAuthenticated(true);
-
-    // Setup encryption
-    if (isEncryptionSupported()) {
-      const salt = generateSalt();
-      localStorage.setItem(STORAGE_KEYS.SALT, arrayToBase64(salt));
-      const key = await deriveKey(newPin, salt);
-      setCryptoKey(key);
-    }
+    setCryptoKey(key);
+    localStorage.setItem(STORAGE_KEYS.ENCRYPTED, 'true');
 
     // Initialize default data
     setFolders([{ id: 'default', name: 'General', createdAt: Date.now() }]);
@@ -270,7 +287,38 @@ function App() {
     sessionStorage.removeItem(STORAGE_KEYS.SESSION);
     setIsAuthenticated(false);
     setCryptoKey(null);
+    // Clear sensitive data from memory
+    setFolders([]);
+    setBookmarks([]);
+    setDataLoaded(false);
   };
+
+  // Auto-lock timer: Lock app after 5 minutes of inactivity
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    let timeoutId: number;
+
+    const resetTimer = () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        handleLock();
+        showToast('Locked due to inactivity', 'success');
+      }, AUTO_LOCK_TIMEOUT_MS);
+    };
+
+    // Reset timer on user activity
+    const events = ['mousedown', 'keydown', 'touchstart', 'scroll'];
+    events.forEach(event => window.addEventListener(event, resetTimer));
+
+    // Start the timer
+    resetTimer();
+
+    return () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      events.forEach(event => window.removeEventListener(event, resetTimer));
+    };
+  }, [isAuthenticated]);
 
   // Data Handlers
   const handleAddFolder = (e: React.FormEvent) => {

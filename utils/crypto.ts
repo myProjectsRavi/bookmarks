@@ -50,7 +50,7 @@ export async function deriveKey(pin: string, salt: Uint8Array): Promise<CryptoKe
     return crypto.subtle.deriveKey(
         {
             name: 'PBKDF2',
-            salt,
+            salt: salt as BufferSource,
             iterations: ITERATIONS,
             hash: 'SHA-256'
         },
@@ -113,4 +113,32 @@ export function isEncryptionSupported(): boolean {
     return typeof crypto !== 'undefined' &&
         typeof crypto.subtle !== 'undefined' &&
         typeof crypto.subtle.deriveKey === 'function';
+}
+
+// Canary string for PIN verification (never store the actual PIN!)
+const CANARY_STRING = 'LINKHAVEN_VERIFIED_2025';
+
+/**
+ * Create an encrypted canary for PIN verification
+ * This allows verifying the PIN without storing it in plain text
+ */
+export async function createVerificationCanary(key: CryptoKey): Promise<string> {
+    return encrypt(CANARY_STRING, key);
+}
+
+/**
+ * Verify PIN by attempting to decrypt the canary
+ * Returns true if the PIN is correct, false otherwise
+ */
+export async function verifyPinWithCanary(
+    encryptedCanary: string,
+    key: CryptoKey
+): Promise<boolean> {
+    try {
+        const decrypted = await decrypt(encryptedCanary, key);
+        return decrypted === CANARY_STRING;
+    } catch (e) {
+        // Decryption failed = wrong PIN
+        return false;
+    }
 }
