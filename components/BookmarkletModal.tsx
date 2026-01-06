@@ -28,11 +28,16 @@ export const BookmarkletModal: React.FC<BookmarkletModalProps> = ({ appUrl, onCl
     };
 
     const handleDragStart = (e: React.DragEvent) => {
+        const title = '+ LinkHaven';
         // Set multiple data types for better browser compatibility
         e.dataTransfer.setData('text/plain', bookmarkletCode);
         e.dataTransfer.setData('text/uri-list', bookmarkletCode);
-        // Some browsers use this for bookmark title
-        e.dataTransfer.setData('text/x-moz-url', `${bookmarkletCode}\n+ Add to LinkHaven`);
+        // Firefox uses this format (URL on first line, title on second)
+        e.dataTransfer.setData('text/x-moz-url', `${bookmarkletCode}\n${title}`);
+        // Chrome/Safari use HTML anchor for bookmark title extraction
+        e.dataTransfer.setData('text/html', `<a href="${bookmarkletCode}">${title}</a>`);
+        // Set drag effect
+        e.dataTransfer.effectAllowed = 'copyLink';
     };
 
     return (

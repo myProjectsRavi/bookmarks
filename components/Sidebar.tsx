@@ -2,9 +2,9 @@ import React, { useRef } from 'react';
 import {
   Folder as FolderIcon, Layers, Plus, FolderOpen, Trash2, Download,
   UploadCloud, Database, Bookmark, Activity, FileUp, Zap,
-  Copy, Sparkles, Smartphone
+  Copy, Sparkles, Smartphone, FileText, BookOpen
 } from 'lucide-react';
-import { Folder } from '../types';
+import { Folder, Notebook } from '../types';
 
 interface SidebarProps {
   folders: Folder[];
@@ -24,6 +24,14 @@ interface SidebarProps {
   onShowDeduplication?: () => void;
   onShowSync?: () => void;
   isPremium?: boolean;
+  // Notes features
+  notebooks?: Notebook[];
+  noteCounts?: Record<string, number>;
+  activeNotebookId?: string | 'ALL_NOTES' | null;
+  onSelectNotebook?: (id: string | 'ALL_NOTES') => void;
+  onAddNotebook?: () => void;
+  onDeleteNotebook?: (id: string) => void;
+  onShowNotebookSync?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -43,7 +51,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   // Premium
   onShowDeduplication,
   onShowSync,
-  isPremium = true, // Default to true for now (will be gated later)
+  isPremium = true,
+  // Notes
+  notebooks = [],
+  noteCounts = {},
+  activeNotebookId,
+  onSelectNotebook,
+  onAddNotebook,
+  onDeleteNotebook,
+  onShowNotebookSync,
 }) => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -178,6 +194,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </span>
               </button>
             </li>
+            {/* All Notes - below All Bookmarks */}
+            {onSelectNotebook && (
+              <li>
+                <button
+                  onClick={() => onSelectNotebook('ALL_NOTES')}
+                  className={`w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-lg transition-colors duration-200 group ${activeNotebookId === 'ALL_NOTES'
+                    ? 'bg-purple-500/10 text-purple-400 font-medium'
+                    : 'hover:bg-slate-800/50 hover:text-white'
+                    }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <FileText size={18} className={activeNotebookId === 'ALL_NOTES' ? 'text-purple-400' : 'text-slate-500 group-hover:text-slate-400'} />
+                    <span>All Notes</span>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${activeNotebookId === 'ALL_NOTES' ? 'bg-purple-500/20 text-purple-300' : 'bg-slate-800 text-slate-500'}`}>
+                    {noteCounts['ALL_NOTES'] || 0}
+                  </span>
+                </button>
+              </li>
+            )}
           </ul>
         </div>
 
@@ -205,6 +241,67 @@ export const Sidebar: React.FC<SidebarProps> = ({
             ))}
           </ul>
         </div>
+
+        {/* Notebooks Section */}
+        {onSelectNotebook && (
+          <div>
+            <div className="flex items-center justify-between mb-3 px-2">
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Notebooks</h3>
+              <button
+                onClick={onAddNotebook}
+                className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-purple-400 transition-colors"
+                title="Add New Notebook"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
+
+            <ul className="space-y-0.5">
+              {notebooks.filter(n => !n.parentId).length === 0 && (
+                <li className="px-3 py-4 text-center border-2 border-dashed border-slate-800 rounded-lg">
+                  <p className="text-xs text-slate-500">No notebooks yet</p>
+                </li>
+              )}
+              {notebooks.filter(n => !n.parentId).map((notebook) => {
+                const isActive = activeNotebookId === notebook.id;
+                const count = noteCounts[notebook.id] || 0;
+                return (
+                  <li key={notebook.id} className="relative group">
+                    <button
+                      onClick={() => onSelectNotebook(notebook.id)}
+                      className={`w-full flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-colors duration-200 ${isActive
+                        ? 'bg-purple-500/10 text-purple-400 font-medium'
+                        : 'hover:bg-slate-800/50 hover:text-white'
+                        }`}
+                    >
+                      <div className="flex items-center gap-2 overflow-hidden">
+                        <BookOpen size={16} className={isActive ? 'text-purple-400' : 'text-slate-500 group-hover:text-slate-400'} />
+                        <span className="truncate">{notebook.name}</span>
+                      </div>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 ml-2 ${isActive ? 'bg-purple-500/20 text-purple-300' : 'bg-slate-800 text-slate-500'
+                        }`}>
+                        {count}
+                      </span>
+                    </button>
+                    {/* Delete Action */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm(`Delete notebook "${notebook.name}"? This will delete all notes inside it.`)) {
+                          onDeleteNotebook?.(notebook.id);
+                        }
+                      }}
+                      className="absolute right-1 top-2 p-1 text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 shadow-sm rounded z-10"
+                      title="Delete Notebook"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
 
         {/* Quick Actions */}
         <div>

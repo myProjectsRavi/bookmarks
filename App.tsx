@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, Plus, Menu, LogOut, UploadCloud, AlertTriangle, Tag, Download, Loader } from 'lucide-react';
-import { Folder, Bookmark, ModalType } from './types';
+import { Search, Plus, Menu, LogOut, UploadCloud, AlertTriangle, Tag, Download, Loader, FileText } from 'lucide-react';
+import { Folder, Bookmark, ModalType, Notebook, Note } from './types';
 import { Sidebar } from './components/Sidebar';
 import { BookmarkGrid } from './components/BookmarkGrid';
+import { NotesGrid } from './components/NotesGrid';
 import { Modal } from './components/Modal';
 import { LockScreen } from './components/LockScreen';
 import { Toast } from './components/Toast';
@@ -12,6 +13,7 @@ import { DeduplicationWizard } from './components/DeduplicationWizard';
 import { SnapshotCapture } from './components/SnapshotCapture';
 import { SnapshotViewer } from './components/SnapshotViewer';
 import { QRSync } from './components/QRSync';
+import { NotebookSync } from './components/NotebookSync';
 import { parseImportFile } from './utils/importers';
 import { fetchUrlMetadata } from './utils/metadata';
 import { checkMultipleLinks } from './utils/linkChecker';
@@ -37,6 +39,8 @@ const STORAGE_KEYS = {
   SALT: 'lh_salt',
   FOLDERS: 'lh_folders',
   BOOKMARKS: 'lh_bookmarks',
+  NOTEBOOKS: 'lh_notebooks',
+  NOTES: 'lh_notes',
   SESSION: 'lh_session',
   ENCRYPTED: 'lh_encrypted'
 };
@@ -54,9 +58,12 @@ function App() {
   // --- Data State ---
   const [folders, setFolders] = useState<Folder[]>([]);
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
+  const [notebooks, setNotebooks] = useState<Notebook[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
   const [dataLoaded, setDataLoaded] = useState(false);
 
   const [activeFolderId, setActiveFolderId] = useState<string | 'ALL'>('ALL');
+  const [activeNotebookId, setActiveNotebookId] = useState<string | 'ALL_NOTES' | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTag, setActiveTag] = useState<string>('');
   const [modalType, setModalType] = useState<ModalType>(null);
@@ -71,8 +78,15 @@ function App() {
   const [selectedFolderForAdd, setSelectedFolderForAdd] = useState<string>('');
   const [newFolderParentId, setNewFolderParentId] = useState<string>('');
 
+  // Notes Form State
+  const [newNoteTitle, setNewNoteTitle] = useState('');
+  const [newNoteContent, setNewNoteContent] = useState('');
+  const [newNoteTags, setNewNoteTags] = useState<string[]>([]);
+  const [selectedNotebookForAdd, setSelectedNotebookForAdd] = useState<string>('');
+
   // Edit State
   const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
 
   // Import State
   const [pendingImportData, setPendingImportData] = useState<{ folders: Folder[], bookmarks: Bookmark[] } | null>(null);
@@ -91,51 +105,75 @@ function App() {
 
       let foldersData = localStorage.getItem(STORAGE_KEYS.FOLDERS);
       let bookmarksData = localStorage.getItem(STORAGE_KEYS.BOOKMARKS);
+      let notebooksData = localStorage.getItem(STORAGE_KEYS.NOTEBOOKS);
+      let notesData = localStorage.getItem(STORAGE_KEYS.NOTES);
 
-      if (isEncrypted && key && foldersData && bookmarksData) {
+      if (isEncrypted && key) {
         try {
-          foldersData = await decrypt(foldersData, key);
-          bookmarksData = await decrypt(bookmarksData, key);
+          if (foldersData) foldersData = await decrypt(foldersData, key);
+          if (bookmarksData) bookmarksData = await decrypt(bookmarksData, key);
+          if (notebooksData) notebooksData = await decrypt(notebooksData, key);
+          if (notesData) notesData = await decrypt(notesData, key);
         } catch (e) {
           console.error('Decryption failed:', e);
-          // Data might not be encrypted yet
         }
       }
 
       const loadedFolders = foldersData ? JSON.parse(foldersData) : [{ id: 'default', name: 'General', createdAt: Date.now() }];
       const loadedBookmarks = bookmarksData ? JSON.parse(bookmarksData) : [];
+      const loadedNotebooks = notebooksData ? JSON.parse(notebooksData) : [{ id: 'default-notebook', name: 'General', createdAt: Date.now() }];
+      const loadedNotes = notesData ? JSON.parse(notesData) : [];
 
-      // Ensure tags array exists on all bookmarks
+      // Ensure tags array exists
       const normalizedBookmarks = loadedBookmarks.map((b: Bookmark) => ({
         ...b,
         tags: b.tags || []
       }));
+      const normalizedNotes = loadedNotes.map((n: Note) => ({
+        ...n,
+        tags: n.tags || []
+      }));
 
       setFolders(loadedFolders);
       setBookmarks(normalizedBookmarks);
+      setNotebooks(loadedNotebooks);
+      setNotes(normalizedNotes);
       setDataLoaded(true);
     } catch (e) {
       console.error('Failed to load data:', e);
       setFolders([{ id: 'default', name: 'General', createdAt: Date.now() }]);
       setBookmarks([]);
+      setNotebooks([{ id: 'default-notebook', name: 'General', createdAt: Date.now() }]);
+      setNotes([]);
       setDataLoaded(true);
     }
   }, []);
 
   // --- Save Data (with encryption) ---
-  const saveData = useCallback(async (foldersToSave: Folder[], bookmarksToSave: Bookmark[]) => {
+  const saveData = useCallback(async (
+    foldersToSave: Folder[],
+    bookmarksToSave: Bookmark[],
+    notebooksToSave: Notebook[],
+    notesToSave: Note[]
+  ) => {
     try {
       let foldersData = JSON.stringify(foldersToSave);
       let bookmarksData = JSON.stringify(bookmarksToSave);
+      let notebooksData = JSON.stringify(notebooksToSave);
+      let notesData = JSON.stringify(notesToSave);
 
       if (cryptoKey && isEncryptionSupported()) {
         foldersData = await encrypt(foldersData, cryptoKey);
         bookmarksData = await encrypt(bookmarksData, cryptoKey);
+        notebooksData = await encrypt(notebooksData, cryptoKey);
+        notesData = await encrypt(notesData, cryptoKey);
         localStorage.setItem(STORAGE_KEYS.ENCRYPTED, 'true');
       }
 
       localStorage.setItem(STORAGE_KEYS.FOLDERS, foldersData);
       localStorage.setItem(STORAGE_KEYS.BOOKMARKS, bookmarksData);
+      localStorage.setItem(STORAGE_KEYS.NOTEBOOKS, notebooksData);
+      localStorage.setItem(STORAGE_KEYS.NOTES, notesData);
     } catch (e) {
       console.error('Failed to save data:', e);
     }
@@ -144,9 +182,9 @@ function App() {
   // --- Effects ---
   useEffect(() => {
     if (dataLoaded) {
-      saveData(folders, bookmarks);
+      saveData(folders, bookmarks, notebooks, notes);
     }
-  }, [folders, bookmarks, dataLoaded, saveData]);
+  }, [folders, bookmarks, notebooks, notes, dataLoaded, saveData]);
 
   // Handle URL params for bookmarklet
   useEffect(() => {
@@ -217,12 +255,58 @@ function App() {
     return counts;
   }, [bookmarks, folders]);
 
+  // Notes computed values
+  const allNoteTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    notes.forEach(n => {
+      n.tags?.forEach(t => tagSet.add(t));
+    });
+    return Array.from(tagSet).sort();
+  }, [notes]);
+
+  const filteredNotes = useMemo(() => {
+    let result = notes;
+
+    // Tag Filter
+    if (activeTag) {
+      result = result.filter(n => n.tags?.includes(activeTag));
+    }
+
+    // Search Filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      return result.filter(n => {
+        const title = (n.title || '').toLowerCase();
+        const content = (n.content || '').toLowerCase();
+        const tags = (n.tags || []).join(' ').toLowerCase();
+        return title.includes(q) || content.includes(q) || tags.includes(q);
+      }).sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+    }
+
+    // Notebook Filter
+    if (activeNotebookId && activeNotebookId !== 'ALL_NOTES') {
+      result = result.filter(n => n.notebookId === activeNotebookId);
+    }
+
+    return result.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+  }, [notes, activeNotebookId, searchQuery, activeTag]);
+
+  const noteCounts = useMemo(() => {
+    const counts: Record<string, number> = { 'ALL_NOTES': notes.length };
+    notebooks.forEach(nb => {
+      counts[nb.id] = notes.filter(n => n.notebookId === nb.id).length;
+    });
+    return counts;
+  }, [notes, notebooks]);
+
   const activeFolderName = useMemo(() => {
     if (activeTag) return `Tag: #${activeTag}`;
     if (searchQuery.trim()) return 'Search Results';
+    if (activeNotebookId === 'ALL_NOTES') return 'All Notes';
+    if (activeNotebookId) return notebooks.find(n => n.id === activeNotebookId)?.name || 'Unknown Notebook';
     if (activeFolderId === 'ALL') return 'All Bookmarks';
     return folders.find(f => f.id === activeFolderId)?.name || 'Unknown Folder';
-  }, [activeTag, searchQuery, activeFolderId, folders]);
+  }, [activeTag, searchQuery, activeNotebookId, activeFolderId, folders, notebooks]);
 
   // --- Handlers ---
 
@@ -441,6 +525,80 @@ function App() {
     setIsFetchingMeta(false);
   };
 
+  // Notes/Notebooks Handlers
+  const handleAddNotebook = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newItemName.trim()) return;
+    const newNotebook: Notebook = {
+      id: generateId(),
+      name: newItemName.trim(),
+      parentId: null,
+      createdAt: Date.now()
+    };
+    setNotebooks([...notebooks, newNotebook]);
+    setModalType(null);
+    setNewItemName('');
+    showToast(`Notebook "${newNotebook.name}" created`, 'success');
+  };
+
+  const handleSaveNote = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newNoteTitle.trim() || !newNoteContent.trim()) return;
+
+    let notebookId = selectedNotebookForAdd;
+    if (!notebookId) {
+      notebookId = activeNotebookId && activeNotebookId !== 'ALL_NOTES' ? activeNotebookId : notebooks[0]?.id || 'default-notebook';
+    }
+
+    const now = Date.now();
+    if (modalType === 'EDIT_NOTE' && editingNoteId) {
+      // Edit existing
+      const updatedNote: Note = {
+        id: editingNoteId,
+        notebookId,
+        title: newNoteTitle.trim(),
+        content: newNoteContent.trim(),
+        tags: newNoteTags,
+        createdAt: notes.find(n => n.id === editingNoteId)?.createdAt || now,
+        updatedAt: now
+      };
+      setNotes(notes.map(n => n.id === editingNoteId ? updatedNote : n));
+      showToast('Note updated', 'success');
+    } else {
+      // Create new
+      const newNote: Note = {
+        id: generateId(),
+        notebookId,
+        title: newNoteTitle.trim(),
+        content: newNoteContent.trim(),
+        tags: newNoteTags,
+        createdAt: now,
+        updatedAt: now
+      };
+      setNotes([newNote, ...notes]);
+      showToast('Note added', 'success');
+    }
+
+    // Reset
+    setModalType(null);
+    setEditingNoteId(null);
+    setNewNoteTitle('');
+    setNewNoteContent('');
+    setNewNoteTags([]);
+  };
+
+  const deleteNotebook = (id: string) => {
+    setNotebooks(notebooks.filter(n => n.id !== id));
+    setNotes(notes.filter(n => n.notebookId !== id));
+    if (activeNotebookId === id) setActiveNotebookId('ALL_NOTES');
+    showToast('Notebook deleted', 'success');
+  };
+
+  const deleteNote = (id: string) => {
+    setNotes(notes.filter(n => n.id !== id));
+    showToast('Note deleted', 'success');
+  };
+
   // Export / Import Handlers
   const handleExport = () => {
     try {
@@ -576,6 +734,29 @@ function App() {
     setModalType('ADD_FOLDER');
   };
 
+  const openAddNoteModal = () => {
+    setNewNoteTitle('');
+    setNewNoteContent('');
+    setNewNoteTags([]);
+    setSelectedNotebookForAdd(activeNotebookId && activeNotebookId !== 'ALL_NOTES' ? activeNotebookId : notebooks[0]?.id || '');
+    setEditingNoteId(null);
+    setModalType('ADD_NOTE');
+  };
+
+  const openEditNoteModal = (note: Note) => {
+    setNewNoteTitle(note.title);
+    setNewNoteContent(note.content);
+    setNewNoteTags(note.tags || []);
+    setSelectedNotebookForAdd(note.notebookId);
+    setEditingNoteId(note.id);
+    setModalType('EDIT_NOTE');
+  };
+
+  const openNotebookModal = () => {
+    setNewItemName('');
+    setModalType('ADD_NOTEBOOK');
+  };
+
   const handleTagClick = (tag: string) => {
     setActiveTag(tag);
     setSearchQuery('');
@@ -640,6 +821,7 @@ function App() {
           activeFolderId={activeFolderId}
           onSelectFolder={(id) => {
             setActiveTag('');
+            setActiveNotebookId(null); // Clear notebook selection when selecting folder
             if (!searchQuery.trim()) {
               setActiveFolderId(id);
             } else {
@@ -661,6 +843,18 @@ function App() {
           onShowDeduplication={() => setModalType('DEDUPLICATION')}
           onShowSync={() => setModalType('QR_SYNC')}
           isPremium={true}
+          notebooks={notebooks}
+          noteCounts={noteCounts}
+          activeNotebookId={activeNotebookId}
+          onSelectNotebook={(id) => {
+            setActiveTag('');
+            setActiveFolderId('ALL'); // Clear folder selection when selecting notebook
+            setActiveNotebookId(id);
+            if (window.innerWidth < 768) setIsSidebarOpen(false);
+          }}
+          onAddNotebook={openNotebookModal}
+          onDeleteNotebook={deleteNotebook}
+          onShowNotebookSync={() => setModalType('NOTEBOOK_SYNC')}
         />
       </div>
 
@@ -707,14 +901,25 @@ function App() {
               />
             </div>
 
-            <button
-              onClick={openAddModal}
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl font-medium shadow-sm shadow-indigo-200 transition-all active:scale-95 flex-shrink-0"
-            >
-              <Plus size={18} />
-              <span className="hidden sm:inline">Add URL</span>
-              <span className="sm:hidden">Add</span>
-            </button>
+            {activeNotebookId ? (
+              <button
+                onClick={openAddNoteModal}
+                className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-xl font-medium shadow-sm shadow-purple-200 transition-all active:scale-95 flex-shrink-0"
+              >
+                <FileText size={18} />
+                <span className="hidden sm:inline">Add Note</span>
+                <span className="sm:hidden">Add</span>
+              </button>
+            ) : (
+              <button
+                onClick={openAddModal}
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl font-medium shadow-sm shadow-indigo-200 transition-all active:scale-95 flex-shrink-0"
+              >
+                <Plus size={18} />
+                <span className="hidden sm:inline">Add URL</span>
+                <span className="sm:hidden">Add</span>
+              </button>
+            )}
 
             <button
               onClick={handleLock}
@@ -729,14 +934,25 @@ function App() {
         {/* Content */}
         <main className="flex-1 overflow-y-auto px-6 py-8">
           <div className="max-w-7xl mx-auto">
-            <BookmarkGrid
-              bookmarks={filteredBookmarks}
-              onDeleteBookmark={deleteBookmark}
-              onEditBookmark={openEditModal}
-              onTagClick={handleTagClick}
-              searchQuery={searchQuery}
-              folders={folders}
-            />
+            {activeNotebookId ? (
+              <NotesGrid
+                notes={filteredNotes}
+                notebooks={notebooks}
+                onDeleteNote={deleteNote}
+                onEditNote={openEditNoteModal}
+                onTagClick={handleTagClick}
+                searchQuery={searchQuery}
+              />
+            ) : (
+              <BookmarkGrid
+                bookmarks={filteredBookmarks}
+                onDeleteBookmark={deleteBookmark}
+                onEditBookmark={openEditModal}
+                onTagClick={handleTagClick}
+                searchQuery={searchQuery}
+                folders={folders}
+              />
+            )}
           </div>
         </main>
       </div>

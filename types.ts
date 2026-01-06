@@ -20,6 +20,24 @@ export interface Bookmark {
   createdAt: number;
 }
 
+export interface Notebook {
+  id: string;
+  name: string;
+  parentId?: string | null;
+  icon?: string;
+  createdAt: number;
+}
+
+export interface Note {
+  id: string;
+  notebookId: string;
+  title: string;
+  content: string;
+  tags?: string[];
+  createdAt: number;
+  updatedAt?: number;
+}
+
 export type ModalType =
   | 'ADD_BOOKMARK'
   | 'ADD_FOLDER'
@@ -35,6 +53,11 @@ export type ModalType =
   | 'QR_SYNC'
   | 'CLEANUP_WIZARD'
   | 'PREMIUM_UPGRADE'
+  // Notes modals
+  | 'ADD_NOTE'
+  | 'EDIT_NOTE'
+  | 'ADD_NOTEBOOK'
+  | 'NOTEBOOK_SYNC'
   | null;
 
 export interface ViewState {
