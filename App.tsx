@@ -13,6 +13,7 @@ import { AuditTrailViewer } from './components/AuditTrailViewer';
 import { parseImportFile } from './utils/importers';
 import { fetchUrlMetadata } from './utils/metadata';
 import { checkMultipleLinks } from './utils/linkChecker';
+import { audit } from './utils/auditTrail';
 import {
   deriveKey,
   encrypt,
@@ -337,6 +338,8 @@ function App() {
     setNewItemName('');
     setNewFolderParentId('');
     showToast(`Folder "${newFolder.name}" created`, 'success');
+    // Audit logging
+    audit.folderCreated(newFolder);
   };
 
   const handleSaveBookmark = (e: React.FormEvent) => {
@@ -359,15 +362,19 @@ function App() {
 
     if (modalType === 'EDIT_BOOKMARK' && editingBookmarkId) {
       // Edit Existing
-      setBookmarks(bookmarks.map(b => b.id === editingBookmarkId ? {
-        ...b,
+      const updatedBookmark = {
+        id: editingBookmarkId,
+        folderId,
         title,
         url: newItemUrl.includes('://') ? newItemUrl : `https://${newItemUrl}`,
         description: newItemDescription.trim(),
         tags: newItemTags,
-        folderId
-      } : b));
+        createdAt: bookmarks.find(b => b.id === editingBookmarkId)?.createdAt || Date.now()
+      };
+      setBookmarks(bookmarks.map(b => b.id === editingBookmarkId ? updatedBookmark : b));
       showToast('Bookmark updated', 'success');
+      // Audit logging
+      audit.bookmarkUpdated(updatedBookmark as Bookmark);
     } else {
       // Create New
       const newBookmark: Bookmark = {
@@ -381,6 +388,8 @@ function App() {
       };
       setBookmarks([newBookmark, ...bookmarks]);
       showToast('Bookmark added', 'success');
+      // Audit logging
+      audit.bookmarkCreated(newBookmark);
     }
 
     // Reset
@@ -403,17 +412,27 @@ function App() {
     };
 
     const idsToDelete = getIdsToDelete(id);
+    const folderToDelete = folders.find(f => f.id === id);
 
     setFolders(folders.filter(f => !idsToDelete.includes(f.id)));
     setBookmarks(bookmarks.filter(b => !idsToDelete.includes(b.folderId)));
 
     if (idsToDelete.includes(activeFolderId as string)) setActiveFolderId('ALL');
     showToast('Folder deleted', 'success');
+    // Audit logging
+    if (folderToDelete) {
+      audit.folderDeleted(id, folderToDelete.name);
+    }
   };
 
   const deleteBookmark = (id: string) => {
+    const bookmarkToDelete = bookmarks.find(b => b.id === id);
     setBookmarks(bookmarks.filter(b => b.id !== id));
     showToast('Bookmark deleted', 'success');
+    // Audit logging
+    if (bookmarkToDelete) {
+      audit.bookmarkDeleted(id, bookmarkToDelete.title);
+    }
   };
 
   // Auto-fetch metadata
@@ -501,6 +520,8 @@ function App() {
         setBookmarks(pendingImportData.bookmarks);
         showToast('Data restored successfully', 'success');
       }
+      // Audit logging
+      audit.dataImported(pendingImportData.bookmarks.length);
       setPendingImportData(null);
       setModalType(null);
     }
