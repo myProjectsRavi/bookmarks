@@ -1193,6 +1193,145 @@ function App() {
         />
       </Modal>
 
+      {/* Add Notebook Modal */}
+      <Modal
+        isOpen={modalType === 'ADD_NOTEBOOK'}
+        onClose={() => setModalType(null)}
+        title="Create New Notebook"
+      >
+        <form onSubmit={handleAddNotebook} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Notebook Name</label>
+            <input
+              type="text"
+              required
+              autoFocus
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all"
+              placeholder="e.g., Work Notes"
+              value={newItemName}
+              onChange={(e) => setNewItemName(e.target.value)}
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setModalType(null)}
+              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-lg shadow-sm transition-colors"
+            >
+              Create Notebook
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Add/Edit Note Modal */}
+      <Modal
+        isOpen={modalType === 'ADD_NOTE' || modalType === 'EDIT_NOTE'}
+        onClose={() => setModalType(null)}
+        title={modalType === 'EDIT_NOTE' ? 'Edit Note' : 'Create New Note'}
+      >
+        <form onSubmit={handleSaveNote} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Title *</label>
+            <input
+              type="text"
+              required
+              autoFocus
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all"
+              placeholder="Note title..."
+              value={newNoteTitle}
+              onChange={(e) => setNewNoteTitle(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Content *</label>
+            <textarea
+              required
+              rows={6}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all resize-none"
+              placeholder="Write your note here..."
+              value={newNoteContent}
+              onChange={(e) => setNewNoteContent(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Notebook</label>
+            <select
+              value={selectedNotebookForAdd}
+              onChange={(e) => setSelectedNotebookForAdd(e.target.value)}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 outline-none transition-all bg-white"
+            >
+              {notebooks.map(nb => (
+                <option key={nb.id} value={nb.id}>{nb.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Tags (Optional)</label>
+            <TagInput
+              tags={newNoteTags}
+              onTagsChange={setNewNoteTags}
+              placeholder="Add tags..."
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setModalType(null)}
+              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-4 py-2 text-sm font-medium text-white bg-purple-600 hover:bg-purple-700 rounded-lg shadow-sm transition-colors"
+            >
+              {modalType === 'EDIT_NOTE' ? 'Update Note' : 'Create Note'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Notebook Sync Modal */}
+      <Modal
+        isOpen={modalType === 'NOTEBOOK_SYNC'}
+        onClose={() => setModalType(null)}
+        title="Sync Notebooks"
+      >
+        <NotebookSync
+          notebooks={notebooks}
+          notes={notes}
+          onImport={(importedNotebooks, importedNotes) => {
+            // Generate new IDs to avoid conflicts
+            const idMap = new Map<string, string>();
+
+            const newNotebooks = importedNotebooks.map(nb => {
+              const newId = generateId();
+              idMap.set(nb.id, newId);
+              return { ...nb, id: newId };
+            });
+
+            const newNotes = importedNotes.map(n => ({
+              ...n,
+              id: generateId(),
+              notebookId: idMap.get(n.notebookId) || n.notebookId
+            }));
+
+            setNotebooks([...notebooks, ...newNotebooks]);
+            setNotes([...notes, ...newNotes]);
+
+            showToast(`Imported ${newNotebooks.length} notebooks and ${newNotes.length} notes`, 'success');
+          }}
+          onClose={() => setModalType(null)}
+        />
+      </Modal>
+
     </div>
   );
 }
