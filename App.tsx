@@ -13,6 +13,8 @@ import { DeduplicationWizard } from './components/DeduplicationWizard';
 import { SnapshotCapture } from './components/SnapshotCapture';
 import { SnapshotViewer } from './components/SnapshotViewer';
 import { QRSync } from './components/QRSync';
+import { SecureNoteShare } from './components/SecureNoteShare';
+import { NoteViewer } from './components/NoteViewer';
 import { NotebookSync } from './components/NotebookSync';
 import { parseImportFile } from './utils/importers';
 import { fetchUrlMetadata } from './utils/metadata';
@@ -87,6 +89,7 @@ function App() {
   // Edit State
   const [editingBookmarkId, setEditingBookmarkId] = useState<string | null>(null);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [viewingNote, setViewingNote] = useState<Note | null>(null);
 
   // Import State
   const [pendingImportData, setPendingImportData] = useState<{ folders: Folder[], bookmarks: Bookmark[] } | null>(null);
@@ -747,7 +750,9 @@ function App() {
     setNewNoteTitle(note.title);
     setNewNoteContent(note.content);
     setNewNoteTags(note.tags || []);
-    setSelectedNotebookForAdd(note.notebookId);
+    // Fix: If note's notebook doesn't exist, default to first real notebook
+    const validNotebookId = notebooks.find(nb => nb.id === note.notebookId)?.id || notebooks[0]?.id || '';
+    setSelectedNotebookForAdd(validNotebookId);
     setEditingNoteId(note.id);
     setModalType('EDIT_NOTE');
   };
@@ -944,6 +949,8 @@ function App() {
                 notebooks={notebooks}
                 onDeleteNote={deleteNote}
                 onEditNote={openEditNoteModal}
+                onViewNote={(note) => { setViewingNote(note); setModalType('VIEW_NOTE'); }}
+                onShareNote={(note) => { setViewingNote(note); setModalType('SHARE_NOTE'); }}
                 onTagClick={handleTagClick}
                 searchQuery={searchQuery}
               />
@@ -1268,146 +1275,22 @@ function App() {
             />
           </div>
 
-          {/* Rich Content Area */}
+          {/* Content Area - Simplified */}
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">
               Content
             </label>
-            {/* Rich Text Toolbar - Functional */}
-            <div className="flex items-center gap-1 p-2 bg-slate-100 rounded-t-xl border-2 border-b-0 border-slate-200">
-              <button
-                type="button"
-                onClick={() => {
-                  const textarea = document.getElementById('note-content') as HTMLTextAreaElement;
-                  if (!textarea) return;
-                  const start = textarea.selectionStart;
-                  const end = textarea.selectionEnd;
-                  const text = textarea.value;
-                  const selected = text.substring(start, end);
-                  const newText = text.substring(0, start) + `**${selected || 'bold'}**` + text.substring(end);
-                  setNewNoteContent(newText);
-                  setTimeout(() => { textarea.focus(); textarea.setSelectionRange(start + 2, start + 2 + (selected || 'bold').length); }, 0);
-                }}
-                className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 font-bold"
-                title="Bold (**text**)"
-              >B</button>
-              <button
-                type="button"
-                onClick={() => {
-                  const textarea = document.getElementById('note-content') as HTMLTextAreaElement;
-                  if (!textarea) return;
-                  const start = textarea.selectionStart;
-                  const end = textarea.selectionEnd;
-                  const text = textarea.value;
-                  const selected = text.substring(start, end);
-                  const newText = text.substring(0, start) + `*${selected || 'italic'}*` + text.substring(end);
-                  setNewNoteContent(newText);
-                  setTimeout(() => { textarea.focus(); textarea.setSelectionRange(start + 1, start + 1 + (selected || 'italic').length); }, 0);
-                }}
-                className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 italic"
-                title="Italic (*text*)"
-              >I</button>
-              <button
-                type="button"
-                onClick={() => {
-                  const textarea = document.getElementById('note-content') as HTMLTextAreaElement;
-                  if (!textarea) return;
-                  const start = textarea.selectionStart;
-                  const end = textarea.selectionEnd;
-                  const text = textarea.value;
-                  const selected = text.substring(start, end);
-                  const newText = text.substring(0, start) + `__${selected || 'underline'}__` + text.substring(end);
-                  setNewNoteContent(newText);
-                  setTimeout(() => { textarea.focus(); textarea.setSelectionRange(start + 2, start + 2 + (selected || 'underline').length); }, 0);
-                }}
-                className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 underline"
-                title="Underline (__text__)"
-              >U</button>
-              <div className="w-px h-5 bg-slate-300 mx-1"></div>
-              <button
-                type="button"
-                onClick={() => {
-                  const textarea = document.getElementById('note-content') as HTMLTextAreaElement;
-                  if (!textarea) return;
-                  const start = textarea.selectionStart;
-                  const text = textarea.value;
-                  // Find start of current line
-                  const lineStart = text.lastIndexOf('\n', start - 1) + 1;
-                  const newText = text.substring(0, lineStart) + '# ' + text.substring(lineStart);
-                  setNewNoteContent(newText);
-                  setTimeout(() => { textarea.focus(); textarea.setSelectionRange(start + 2, start + 2); }, 0);
-                }}
-                className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 text-sm"
-                title="Heading (# )"
-              >H1</button>
-              <button
-                type="button"
-                onClick={() => {
-                  const textarea = document.getElementById('note-content') as HTMLTextAreaElement;
-                  if (!textarea) return;
-                  const start = textarea.selectionStart;
-                  const text = textarea.value;
-                  const lineStart = text.lastIndexOf('\n', start - 1) + 1;
-                  const newText = text.substring(0, lineStart) + '• ' + text.substring(lineStart);
-                  setNewNoteContent(newText);
-                  setTimeout(() => { textarea.focus(); textarea.setSelectionRange(start + 2, start + 2); }, 0);
-                }}
-                className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 text-sm"
-                title="Bullet List (• )"
-              >• List</button>
-              <div className="w-px h-5 bg-slate-300 mx-1"></div>
-              <button
-                type="button"
-                onClick={() => {
-                  const textarea = document.getElementById('note-content') as HTMLTextAreaElement;
-                  if (!textarea) return;
-                  const start = textarea.selectionStart;
-                  const end = textarea.selectionEnd;
-                  const text = textarea.value;
-                  const selected = text.substring(start, end);
-                  const newText = text.substring(0, start) + '`' + (selected || 'code') + '`' + text.substring(end);
-                  setNewNoteContent(newText);
-                  setTimeout(() => { textarea.focus(); textarea.setSelectionRange(start + 1, start + 1 + (selected || 'code').length); }, 0);
-                }}
-                className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 text-sm"
-                title="Inline Code (`code`)"
-              >{`</>`}</button>
-              <button
-                type="button"
-                onClick={() => {
-                  const textarea = document.getElementById('note-content') as HTMLTextAreaElement;
-                  if (!textarea) return;
-                  const start = textarea.selectionStart;
-                  const end = textarea.selectionEnd;
-                  const text = textarea.value;
-                  const selected = text.substring(start, end);
-                  const newText = text.substring(0, start) + `[${selected || 'link text'}](url)` + text.substring(end);
-                  setNewNoteContent(newText);
-                  setTimeout(() => { textarea.focus(); textarea.setSelectionRange(start + (selected || 'link text').length + 3, start + (selected || 'link text').length + 6); }, 0);
-                }}
-                className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 text-sm"
-                title="Link [text](url)"
-              >🔗</button>
-            </div>
             <textarea
               id="note-content"
               required
-              rows={12}
-              className="w-full px-4 py-4 text-base border-2 border-t-0 border-slate-200 rounded-b-xl focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 outline-none transition-all resize-none font-mono leading-relaxed"
-              placeholder="Write your note here...
-
-Formatting tips:
-• **bold** for bold text
-• *italic* for italic text
-• # Heading for headings
-• `code` for inline code
-
-Start typing to capture your ideas..."
+              rows={10}
+              className="w-full px-4 py-4 text-base border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500/30 focus:border-purple-500 outline-none transition-all resize-none leading-relaxed"
+              placeholder="Write your note here..."
               value={newNoteContent}
               onChange={(e) => setNewNoteContent(e.target.value)}
             />
             <p className="text-xs text-slate-400 mt-1 text-right">
-              {newNoteContent.length} characters • Markdown supported
+              {newNoteContent.length} characters
             </p>
           </div>
 
@@ -1497,6 +1380,38 @@ Start typing to capture your ideas..."
           onClose={() => setModalType(null)}
         />
       </Modal>
+
+      {/* View Note Modal */}
+      {viewingNote && modalType === 'VIEW_NOTE' && (
+        <Modal
+          isOpen={true}
+          onClose={() => { setModalType(null); setViewingNote(null); }}
+          title={viewingNote.title}
+          size="lg"
+        >
+          <NoteViewer
+            note={viewingNote}
+            notebooks={notebooks}
+            onClose={() => { setModalType(null); setViewingNote(null); }}
+            onEdit={() => { openEditNoteModal(viewingNote); }}
+          />
+        </Modal>
+      )}
+
+      {/* Secure Share Note Modal */}
+      {viewingNote && modalType === 'SHARE_NOTE' && (
+        <Modal
+          isOpen={true}
+          onClose={() => { setModalType(null); setViewingNote(null); }}
+          title="🔒 Secure Share"
+          size="md"
+        >
+          <SecureNoteShare
+            note={viewingNote}
+            onClose={() => { setModalType(null); setViewingNote(null); }}
+          />
+        </Modal>
+      )}
 
     </div>
   );

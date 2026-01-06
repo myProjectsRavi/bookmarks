@@ -1,5 +1,5 @@
 import React from 'react';
-import { FileText, Tag, Trash2, Edit3 } from 'lucide-react';
+import { FileText, Tag, Trash2, Edit3, Eye, Share2 } from 'lucide-react';
 import { Note, Notebook } from '../types';
 
 interface NotesGridProps {
@@ -7,6 +7,8 @@ interface NotesGridProps {
     notebooks: Notebook[];
     onDeleteNote: (id: string) => void;
     onEditNote: (note: Note) => void;
+    onViewNote?: (note: Note) => void;
+    onShareNote?: (note: Note) => void;
     onTagClick?: (tag: string) => void;
     searchQuery?: string;
 }
@@ -32,6 +34,8 @@ export const NotesGrid: React.FC<NotesGridProps> = ({
     notebooks,
     onDeleteNote,
     onEditNote,
+    onViewNote,
+    onShareNote,
     onTagClick,
     searchQuery = ''
 }) => {
@@ -66,12 +70,34 @@ export const NotesGrid: React.FC<NotesGridProps> = ({
             {notes.map((note) => (
                 <div
                     key={note.id}
-                    className="group bg-white rounded-xl border border-slate-200 hover:border-indigo-300 hover:shadow-lg transition-all duration-200 overflow-hidden flex flex-col"
+                    className="group bg-white rounded-xl border border-slate-200 hover:border-purple-300 hover:shadow-lg transition-all duration-200 overflow-hidden flex flex-col relative"
                 >
+                    {/* Top-right icons: View & Share */}
+                    <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {onViewNote && (
+                            <button
+                                onClick={() => onViewNote(note)}
+                                className="p-1.5 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors bg-white/80 backdrop-blur-sm shadow-sm"
+                                title="View Note"
+                            >
+                                <Eye size={14} />
+                            </button>
+                        )}
+                        {onShareNote && (
+                            <button
+                                onClick={() => onShareNote(note)}
+                                className="p-1.5 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors bg-white/80 backdrop-blur-sm shadow-sm"
+                                title="🔒 Secure Share"
+                            >
+                                <Share2 size={14} />
+                            </button>
+                        )}
+                    </div>
+
                     {/* Note Content */}
-                    <div className="p-4 flex-1">
+                    <div className="p-4 flex-1 cursor-pointer" onClick={() => onViewNote?.(note)}>
                         {/* Title */}
-                        <h3 className="font-semibold text-slate-800 mb-2 line-clamp-2">
+                        <h3 className="font-semibold text-slate-800 mb-2 line-clamp-2 pr-16">
                             {highlightMatch(note.title, searchQuery)}
                         </h3>
 
@@ -90,7 +116,7 @@ export const NotesGrid: React.FC<NotesGridProps> = ({
                                             e.stopPropagation();
                                             onTagClick?.(tag);
                                         }}
-                                        className="flex items-center gap-1 px-2 py-0.5 bg-indigo-50 text-indigo-600 rounded-full text-xs hover:bg-indigo-100 transition-colors"
+                                        className="flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-600 rounded-full text-xs hover:bg-purple-100 transition-colors"
                                     >
                                         <Tag size={10} />
                                         {tag}
@@ -105,19 +131,19 @@ export const NotesGrid: React.FC<NotesGridProps> = ({
                         )}
                     </div>
 
-                    {/* Footer */}
+                    {/* Footer with Edit & Delete */}
                     <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
                         <div className="text-xs text-slate-400">
-                            <span className="font-medium text-slate-500">{getNotebookName(note.notebookId)}</span>
+                            <span className="font-medium text-purple-500">{getNotebookName(note.notebookId)}</span>
                             <span className="mx-1">•</span>
                             {formatDate(note.updatedAt || note.createdAt)}
                         </div>
 
-                        {/* Actions */}
+                        {/* Actions: Edit & Delete */}
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                                 onClick={() => onEditNote(note)}
-                                className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                                className="p-1.5 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
                                 title="Edit Note"
                             >
                                 <Edit3 size={14} />

@@ -58,6 +58,9 @@ export type ModalType =
   | 'EDIT_NOTE'
   | 'ADD_NOTEBOOK'
   | 'NOTEBOOK_SYNC'
+  | 'VIEW_NOTE'
+  | 'SHARE_NOTE'
+  | 'UNLOCK_NOTE'
   | null;
 
 export interface ViewState {
