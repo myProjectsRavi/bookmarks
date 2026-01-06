@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, Plus, Menu, LogOut, UploadCloud, AlertTriangle, Tag, Download, Loader, FileText } from 'lucide-react';
+import { Search, Plus, Menu, LogOut, UploadCloud, AlertTriangle, Tag, Download, Loader, FileText, Lock } from 'lucide-react';
 import { Folder, Bookmark, ModalType, Notebook, Note } from './types';
 import { Sidebar } from './components/Sidebar';
 import { BookmarkGrid } from './components/BookmarkGrid';
@@ -15,6 +15,7 @@ import { SnapshotViewer } from './components/SnapshotViewer';
 import { QRSync } from './components/QRSync';
 import { SecureNoteShare } from './components/SecureNoteShare';
 import { NoteViewer } from './components/NoteViewer';
+import { UnlockNote } from './components/UnlockNote';
 import { NotebookSync } from './components/NotebookSync';
 import { parseImportFile } from './utils/importers';
 import { fetchUrlMetadata } from './utils/metadata';
@@ -911,14 +912,24 @@ function App() {
             </div>
 
             {activeNotebookId ? (
-              <button
-                onClick={openAddNoteModal}
-                className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-xl font-medium shadow-sm shadow-purple-200 transition-all active:scale-95 flex-shrink-0"
-              >
-                <FileText size={18} />
-                <span className="hidden sm:inline">Add Note</span>
-                <span className="sm:hidden">Add</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setModalType('UNLOCK_NOTE')}
+                  className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2.5 rounded-xl font-medium transition-all active:scale-95 flex-shrink-0"
+                  title="Unlock a shared note"
+                >
+                  <Lock size={16} />
+                  <span className="hidden sm:inline">Unlock</span>
+                </button>
+                <button
+                  onClick={openAddNoteModal}
+                  className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2.5 rounded-xl font-medium shadow-sm shadow-purple-200 transition-all active:scale-95 flex-shrink-0"
+                >
+                  <FileText size={18} />
+                  <span className="hidden sm:inline">Add Note</span>
+                  <span className="sm:hidden">Add</span>
+                </button>
+              </div>
             ) : (
               <button
                 onClick={openAddModal}
@@ -1412,6 +1423,16 @@ function App() {
           />
         </Modal>
       )}
+
+      {/* Unlock Shared Note Modal */}
+      <Modal
+        isOpen={modalType === 'UNLOCK_NOTE'}
+        onClose={() => setModalType(null)}
+        title="🔓 Unlock Shared Note"
+        size="md"
+      >
+        <UnlockNote onClose={() => setModalType(null)} />
+      </Modal>
 
     </div>
   );
