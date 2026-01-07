@@ -16,3 +16,7 @@ export type { ToastState, UseToastReturn } from './useToast';
 
 export { useKeyboardShortcuts } from './useKeyboardShortcuts';
 export type { KeyboardShortcuts } from './useKeyboardShortcuts';
+
+export { useBookmarkSearch, useNoteSearch, useGlobalSearch } from './useSearch';
+export type { SearchResult } from './useSearch';
+
