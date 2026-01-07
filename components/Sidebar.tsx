@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import {
   Folder as FolderIcon, Layers, Plus, FolderOpen, Trash2, Download,
   UploadCloud, Database, Bookmark, Activity, FileUp, Zap,
-  Copy, Sparkles, Smartphone, FileText, BookOpen, Network, ChevronDown, ChevronRight, Crown
+  Copy, Sparkles, Smartphone, FileText, BookOpen, Network, ChevronDown, ChevronRight, Crown, Ghost, Lock, Unlock
 } from 'lucide-react';
 import { Folder, Notebook, MainView } from '../types';
 
@@ -34,10 +34,15 @@ interface SidebarProps {
   onAddNotebook?: () => void;
   onDeleteNotebook?: (id: string) => void;
   onShowNotebookSync?: () => void;
-  // New: Main view navigation
   mainView?: MainView;
   onChangeView?: (view: MainView) => void;
   trashCount?: number;
+  // Ghost Vault
+  isVaultMode?: boolean;
+  isVaultUnlocked?: boolean;
+  hasVaultPin?: boolean;
+  vaultBookmarkCount?: number;
+  onToggleVault?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -68,10 +73,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onAddNotebook,
   onDeleteNotebook,
   onShowNotebookSync,
-  // New view navigation
   mainView = 'bookmarks',
   onChangeView,
   trashCount = 0,
+  // Ghost Vault
+  isVaultMode = false,
+  isVaultUnlocked = false,
+  hasVaultPin = false,
+  vaultBookmarkCount = 0,
+  onToggleVault,
 }) => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -421,6 +431,45 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </button>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Ghost Vault Section */}
+        {onToggleVault && (
+          <div>
+            <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3 px-2 flex items-center gap-2">
+              <Ghost size={10} className="text-purple-400" />
+              <span>Ghost Vault</span>
+            </h3>
+            <button
+              onClick={onToggleVault}
+              className={`w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-lg transition-all duration-200 ${isVaultMode
+                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                  : 'hover:bg-slate-800/50 hover:text-white text-slate-400'
+                }`}
+            >
+              <div className="flex items-center gap-3">
+                {isVaultMode && isVaultUnlocked ? (
+                  <Unlock size={16} className="text-purple-400" />
+                ) : (
+                  <Lock size={16} className={isVaultMode ? 'text-purple-400' : 'text-slate-500'} />
+                )}
+                <span>{isVaultMode ? 'Vault Mode Active' : 'Enable Vault Mode'}</span>
+              </div>
+              {isVaultMode && isVaultUnlocked && vaultBookmarkCount > 0 && (
+                <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/30 text-purple-300">
+                  {vaultBookmarkCount}
+                </span>
+              )}
+              {!hasVaultPin && !isVaultMode && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-400">Setup</span>
+              )}
+            </button>
+            {isVaultMode && (
+              <p className="text-xs text-purple-400/60 mt-1 px-3">
+                👻 Hidden bookmarks are visible
+              </p>
+            )}
           </div>
         )}
 

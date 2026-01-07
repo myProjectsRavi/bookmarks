@@ -64,8 +64,11 @@ export const CitationView: React.FC<CitationViewProps> = ({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl overflow-hidden">
+        <div
+            className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4"
+            onClick={(e) => e.target === e.currentTarget && onClose()}
+        >
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col">
                 {/* Header */}
                 <div className="bg-gradient-to-r from-emerald-600 to-teal-600 px-6 py-4 flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -79,13 +82,14 @@ export const CitationView: React.FC<CitationViewProps> = ({
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+                        className="p-2 bg-white/30 hover:bg-white/50 rounded-lg transition-colors"
+                        title="Close"
                     >
                         <X size={20} className="text-white" />
                     </button>
                 </div>
 
-                <div className="p-6 space-y-4">
+                <div className="p-5 space-y-4 overflow-y-auto flex-1">
                     {isLoading ? (
                         <div className="flex items-center justify-center py-12">
                             <Loader className="animate-spin text-emerald-600" size={32} />
@@ -95,17 +99,17 @@ export const CitationView: React.FC<CitationViewProps> = ({
                         <>
                             {/* Paper Info */}
                             <div className="bg-slate-50 rounded-lg p-4">
-                                <h3 className="font-semibold text-slate-800 mb-2 line-clamp-2">
+                                <h3 className="font-semibold text-slate-800 text-base leading-tight mb-2">
                                     {metadata.title || bookmark.title}
                                 </h3>
-                                <p className="text-sm text-slate-600 mb-1">
-                                    {metadata.authors?.join(', ') || 'Unknown authors'}
+                                <p className="text-sm text-slate-600 mb-2 line-clamp-2">
+                                    {metadata.authors?.slice(0, 5).join(', ')}{metadata.authors && metadata.authors.length > 5 ? ' et al.' : ''}
                                 </p>
-                                <div className="flex items-center gap-3 text-xs text-slate-500">
-                                    {metadata.year && <span>{metadata.year}</span>}
-                                    {metadata.journal && <span>• {metadata.journal}</span>}
+                                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                                    {metadata.year && <span className="bg-slate-200 px-2 py-0.5 rounded">{metadata.year}</span>}
+                                    {metadata.journal && <span className="italic">{metadata.journal}</span>}
                                     {metadata.citationCount !== undefined && (
-                                        <span>• {metadata.citationCount} citations</span>
+                                        <span className="text-emerald-600 font-medium">{metadata.citationCount} citations</span>
                                     )}
                                 </div>
                             </div>
@@ -121,8 +125,8 @@ export const CitationView: React.FC<CitationViewProps> = ({
                                             key={format}
                                             onClick={() => setSelectedFormat(format)}
                                             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${selectedFormat === format
-                                                    ? 'bg-emerald-600 text-white'
-                                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                                                ? 'bg-emerald-600 text-white'
+                                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                                                 }`}
                                         >
                                             {getFormatName(format).split(' ')[0]}
@@ -137,7 +141,7 @@ export const CitationView: React.FC<CitationViewProps> = ({
                                     {getFormatName(selectedFormat)} Citation
                                 </label>
                                 <div className="relative">
-                                    <pre className="bg-slate-900 text-slate-100 rounded-lg p-4 text-sm overflow-x-auto whitespace-pre-wrap font-mono">
+                                    <pre className="bg-slate-900 text-slate-100 rounded-lg p-4 text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap font-mono max-h-40">
                                         {citation}
                                     </pre>
                                     <div className="absolute top-2 right-2 flex gap-1">

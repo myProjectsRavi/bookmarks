@@ -30,7 +30,12 @@ export const TagInput: React.FC<TagInputProps> = ({
         : [];
 
     const addTag = (tag: string) => {
-        const trimmed = tag.trim().toLowerCase().replace(/[^a-z0-9-_]/g, '');
+        // Strip leading # if present
+        let trimmed = tag.trim().toLowerCase();
+        if (trimmed.startsWith('#')) {
+            trimmed = trimmed.slice(1);
+        }
+        trimmed = trimmed.replace(/[^a-z0-9-_]/g, '');
         if (trimmed && !tags.includes(trimmed)) {
             onChange([...tags, trimmed]);
         }
@@ -49,6 +54,12 @@ export const TagInput: React.FC<TagInputProps> = ({
             if (selectedIndex >= 0 && suggestions[selectedIndex]) {
                 addTag(suggestions[selectedIndex]);
             } else if (input.trim()) {
+                addTag(input);
+            }
+        } else if (e.key === ' ') {
+            // Space after #hashtag creates a tag
+            if (input.trim().startsWith('#') && input.trim().length > 1) {
+                e.preventDefault();
                 addTag(input);
             }
         } else if (e.key === 'Backspace' && !input && tags.length > 0) {
@@ -114,8 +125,8 @@ export const TagInput: React.FC<TagInputProps> = ({
                             type="button"
                             onClick={() => addTag(suggestion)}
                             className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 ${index === selectedIndex
-                                    ? 'bg-indigo-50 text-indigo-700'
-                                    : 'hover:bg-slate-50'
+                                ? 'bg-indigo-50 text-indigo-700'
+                                : 'hover:bg-slate-50'
                                 }`}
                         >
                             <Tag size={12} className="text-slate-400" />
@@ -127,7 +138,7 @@ export const TagInput: React.FC<TagInputProps> = ({
 
             {/* Helper Text */}
             <p className="mt-1 text-xs text-slate-400">
-                Press Enter or comma to add tags
+                Type #tag and press space, or use Enter/comma
             </p>
         </div>
     );

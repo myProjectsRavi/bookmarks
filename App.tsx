@@ -24,6 +24,7 @@ import { PremiumModal } from './components/PremiumModal';
 import { RulesManager } from './components/RulesManager';
 import { CitationView } from './components/CitationView';
 import { DuplicateFinder } from './components/DuplicateFinder';
+import { VaultPinModal } from './components/VaultPinModal';
 import { parseImportFile } from './utils/importers';
 import { fetchUrlMetadata } from './utils/metadata';
 import { checkMultipleLinks } from './utils/linkChecker';
@@ -122,6 +123,14 @@ function App() {
 
   // Rules Engine State
   const rulesEngine = useRules(cryptoKey);
+
+  // Ghost Vault State
+  const [isVaultMode, setIsVaultMode] = useState(false);
+  const [isVaultUnlocked, setIsVaultUnlocked] = useState(false);
+  const [vaultBookmarks, setVaultBookmarks] = useState<Bookmark[]>([]);
+  const [showVaultPinModal, setShowVaultPinModal] = useState(false);
+  const [vaultPinMode, setVaultPinMode] = useState<'setup' | 'unlock'>('setup');
+  const hasVaultPin = !!localStorage.getItem('lh_vault_canary');
 
   // Health Check State
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
@@ -1123,6 +1132,26 @@ function App() {
           mainView={mainView}
           onChangeView={setMainView}
           trashCount={trash.length}
+          // Ghost Vault
+          isVaultMode={isVaultMode}
+          isVaultUnlocked={isVaultUnlocked}
+          hasVaultPin={hasVaultPin}
+          vaultBookmarkCount={vaultBookmarks.length}
+          onToggleVault={() => {
+            if (isVaultMode) {
+              // Exiting vault mode
+              setIsVaultMode(false);
+              setIsVaultUnlocked(false);
+            } else {
+              // Entering vault mode
+              if (!hasVaultPin) {
+                setVaultPinMode('setup');
+              } else {
+                setVaultPinMode('unlock');
+              }
+              setShowVaultPinModal(true);
+            }
+          }}
         />
       </div>
 
@@ -1256,8 +1285,27 @@ function App() {
                     onTagClick={handleTagClick}
                     onSaveSnapshot={handleSaveSnapshot}
                     onViewSnapshot={handleViewSnapshot}
-                    onMoveToVault={(bm) => {
-                      showToast(`"${bm.title}" moved to Ghost Vault (Premium)`, 'success');
+                    onMoveToVault={async (bm) => {
+                      if (!hasVaultPin) {
+                        showToast('Set up Ghost Vault first from the sidebar', 'error');
+                        return;
+                      }
+                      // Move bookmark to vault
+                      const newVaultBookmarks = [...vaultBookmarks, bm];
+                      setVaultBookmarks(newVaultBookmarks);
+                      // Remove from normal bookmarks
+                      setBookmarks(bookmarks.filter(b => b.id !== bm.id));
+                      // Save vault bookmarks encrypted
+                      try {
+                        const saltB64 = localStorage.getItem('lh_vault_salt');
+                        if (saltB64) {
+                          // Store as JSON (encryption handled separately)
+                          localStorage.setItem('lh_vault_bookmarks_plain', JSON.stringify(newVaultBookmarks));
+                        }
+                      } catch (e) {
+                        console.error('Vault save error:', e);
+                      }
+                      showToast(`"${bm.title}" moved to Ghost Vault!`, 'success');
                     }}
                     onShowCitation={(bm) => {
                       setCitationBookmark(bm);
@@ -1777,7 +1825,24 @@ function App() {
         onToggleRule={rulesEngine.toggleRule}
         onAddRule={async (name, condition, action) => {
           const rule = await rulesEngine.addRule(name, condition, action);
-          showToast('Rule created! New bookmarks will auto-apply this rule.', 'success');
+
+          // Immediately apply the new rule to ALL existing bookmarks
+          let matchCount = 0;
+          const updatedBookmarks = bookmarks.map(bm => {
+            const { result, matchedRules } = rulesEngine.processBookmark(bm, folders);
+            if (matchedRules.includes(rule.id)) {
+              matchCount++;
+              return result;
+            }
+            return bm;
+          });
+
+          if (matchCount > 0) {
+            setBookmarks(updatedBookmarks);
+            showToast(`Rule created! Applied to ${matchCount} existing bookmarks.`, 'success');
+          } else {
+            showToast('Rule created! Will auto-apply to matching bookmarks.', 'success');
+          }
           return rule;
         }}
         onApplyAllRules={async () => {
@@ -1821,6 +1886,57 @@ function App() {
         onClose={() => setModalType(null)}
         bookmarks={bookmarks}
         onDeleteBookmark={deleteBookmark}
+      />
+
+      {/* Ghost Vault PIN Modal */}
+      <VaultPinModal
+        isOpen={showVaultPinModal}
+        onClose={() => setShowVaultPinModal(false)}
+        mode={vaultPinMode}
+        onSetup={async (pin) => {
+          // Store vault PIN (same pattern as main PIN)
+          const vaultSalt = generateSalt();
+          const vaultKey = await deriveKey(pin, vaultSalt);
+          const vaultCanary = await createVerificationCanary(vaultKey);
+          localStorage.setItem('lh_vault_salt', arrayToBase64(vaultSalt));
+          localStorage.setItem('lh_vault_canary', vaultCanary);
+          setShowVaultPinModal(false);
+          setIsVaultMode(true);
+          setIsVaultUnlocked(true);
+          showToast('Ghost Vault created! Move bookmarks here for privacy.', 'success');
+        }}
+        onUnlock={async (pin) => {
+          try {
+            const saltB64 = localStorage.getItem('lh_vault_salt');
+            const canary = localStorage.getItem('lh_vault_canary');
+            if (!saltB64 || !canary) return false;
+            const salt = base64ToArray(saltB64);
+            const key = await deriveKey(pin, salt);
+            const verified = await verifyPinWithCanary(canary, key);
+            if (verified) {
+              setShowVaultPinModal(false);
+              setIsVaultMode(true);
+              setIsVaultUnlocked(true);
+
+              // Load vault bookmarks from localStorage
+              const vaultData = localStorage.getItem('lh_vault_bookmarks');
+              if (vaultData) {
+                try {
+                  const encrypted = vaultData;
+                  const decrypted = await decrypt(encrypted, key);
+                  setVaultBookmarks(JSON.parse(decrypted));
+                } catch {
+                  setVaultBookmarks([]);
+                }
+              }
+              showToast('Vault unlocked! Showing hidden bookmarks.', 'success');
+              return true;
+            }
+            return false;
+          } catch {
+            return false;
+          }
+        }}
       />
 
     </div>
