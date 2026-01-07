@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { ExternalLink, Trash2, Globe, Edit2, Tag, AlertCircle, CheckCircle, Loader, Download, Eye, HardDrive, Lock, BookOpen } from 'lucide-react';
+import { ExternalLink, Trash2, Globe, Edit2, Tag, AlertCircle, CheckCircle, Loader, Download, Eye, HardDrive, Lock, Unlock, BookOpen } from 'lucide-react';
 import { Bookmark, Folder } from '../types';
 import { isAcademicUrl } from '../utils/citationParser';
 
@@ -26,6 +26,7 @@ interface BookmarkGridProps {
   onMoveToVault?: (bookmark: Bookmark) => void;
   onShowCitation?: (bookmark: Bookmark) => void;
   searchQuery: string;
+  isVaultMode?: boolean;
 }
 
 const getFaviconUrl = (url: string) => {
@@ -86,7 +87,8 @@ const BookmarkCard = React.memo<{
   onShowCitation?: () => void;
   isSaving: boolean;
   isAcademic: boolean;
-}>(({ bookmark, folderName, onDelete, onEdit, onTagClick, onSaveSnapshot, onViewSnapshot, onMoveToVault, onShowCitation, isSaving, isAcademic }) => (
+  isVaultMode?: boolean;
+}>(({ bookmark, folderName, onDelete, onEdit, onTagClick, onSaveSnapshot, onViewSnapshot, onMoveToVault, onShowCitation, isSaving, isAcademic, isVaultMode }) => (
   <div
     className={`group bg-white rounded-xl border shadow-sm hover:shadow-md transition-all duration-200 flex flex-col relative overflow-hidden ${bookmark.linkHealth === 'dead'
       ? 'border-red-200 bg-red-50/30'
@@ -233,10 +235,10 @@ const BookmarkCard = React.memo<{
               e.stopPropagation();
               onMoveToVault();
             }}
-            className="p-1.5 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded"
-            title="Move to Ghost Vault"
+            className={`p-1.5 ${isVaultMode ? 'text-purple-500 hover:text-purple-600 hover:bg-purple-50' : 'text-slate-400 hover:text-purple-600 hover:bg-purple-50'} rounded`}
+            title={isVaultMode ? 'Move out of Ghost Vault' : 'Move to Ghost Vault'}
           >
-            <Lock size={12} />
+            {isVaultMode ? <Unlock size={12} /> : <Lock size={12} />}
           </button>
         )}
         {isAcademic && onShowCitation && (
@@ -268,7 +270,8 @@ export const BookmarkGrid: React.FC<BookmarkGridProps> = ({
   onMoveToVault,
   onShowCitation,
   searchQuery,
-  folders
+  folders,
+  isVaultMode = false
 }) => {
   const [savingSnapshotIds, setSavingSnapshotIds] = useState<Set<string>>(new Set());
 
@@ -329,6 +332,7 @@ export const BookmarkGrid: React.FC<BookmarkGridProps> = ({
           onShowCitation={onShowCitation ? () => onShowCitation(bookmark) : undefined}
           isSaving={savingSnapshotIds.has(bookmark.id)}
           isAcademic={isAcademicUrl(bookmark.url)}
+          isVaultMode={isVaultMode}
         />
       ))}
     </div>

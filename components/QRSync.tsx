@@ -7,7 +7,9 @@ interface QRSyncProps {
     bookmarks: Bookmark[];
     notebooks?: Notebook[];
     notes?: Note[];
-    onImport: (folders: Folder[], bookmarks: Bookmark[], notebooks?: Notebook[], notes?: Note[]) => void;
+    vaultBookmarks?: Bookmark[];
+    hasVaultPin?: boolean;
+    onImport: (folders: Folder[], bookmarks: Bookmark[], notebooks?: Notebook[], notes?: Note[], vaultBookmarks?: Bookmark[]) => void;
     onClose: () => void;
 }
 
@@ -26,9 +28,9 @@ function decompressData(compressed: string): string {
 }
 
 // Generate a simple shareable code (not actual QR, but text-based transfer)
-function generateSyncCode(folders: Folder[], bookmarks: Bookmark[], notebooks?: Notebook[], notes?: Note[]): string {
+function generateSyncCode(folders: Folder[], bookmarks: Bookmark[], notebooks?: Notebook[], notes?: Note[], vaultBookmarks?: Bookmark[]): string {
     const payload: any = {
-        v: 2, // version 2 includes notes
+        v: 3, // version 3 includes vault bookmarks
         t: Date.now(),
         f: folders.map(f => ({
             i: f.id,
@@ -69,11 +71,24 @@ function generateSyncCode(folders: Folder[], bookmarks: Bookmark[], notebooks?: 
         }));
     }
 
+    // Add vault bookmarks if present (v3)
+    if (vaultBookmarks && vaultBookmarks.length > 0) {
+        payload.vb = vaultBookmarks.map(b => ({
+            i: b.id,
+            f: b.folderId,
+            t: b.title,
+            u: b.url,
+            d: b.description,
+            g: b.tags,
+            c: b.createdAt
+        }));
+    }
+
     return compressData(JSON.stringify(payload));
 }
 
 // Parse sync code back to data
-function parseSyncCode(code: string): { folders: Folder[], bookmarks: Bookmark[], notebooks: Notebook[], notes: Note[] } | null {
+function parseSyncCode(code: string): { folders: Folder[], bookmarks: Bookmark[], notebooks: Notebook[], notes: Note[], vaultBookmarks: Bookmark[] } | null {
     try {
         const json = decompressData(code);
         const payload = JSON.parse(json);
@@ -99,7 +114,7 @@ function parseSyncCode(code: string): { folders: Folder[], bookmarks: Bookmark[]
             createdAt: b.c
         }));
 
-        // Parse notebooks and notes (v2)
+        // Parse notebooks and notes (v2+)
         const notebooks: Notebook[] = payload.nb ? payload.nb.map((n: any) => ({
             id: n.i,
             name: n.n,
@@ -117,7 +132,18 @@ function parseSyncCode(code: string): { folders: Folder[], bookmarks: Bookmark[]
             updatedAt: n.u
         })) : [];
 
-        return { folders, bookmarks, notebooks, notes };
+        // Parse vault bookmarks (v3+)
+        const vaultBookmarks: Bookmark[] = payload.vb ? payload.vb.map((b: any) => ({
+            id: b.i,
+            folderId: b.f,
+            title: b.t,
+            url: b.u,
+            description: b.d || '',
+            tags: b.g || [],
+            createdAt: b.c
+        })) : [];
+
+        return { folders, bookmarks, notebooks, notes, vaultBookmarks };
     } catch {
         return null;
     }
@@ -128,6 +154,8 @@ export const QRSync: React.FC<QRSyncProps> = ({
     bookmarks,
     notebooks = [],
     notes = [],
+    vaultBookmarks = [],
+    hasVaultPin = false,
     onImport,
     onClose
 }) => {
@@ -136,14 +164,15 @@ export const QRSync: React.FC<QRSyncProps> = ({
     const [importCode, setImportCode] = useState('');
     const [copied, setCopied] = useState(false);
     const [error, setError] = useState('');
+    const [importedVaultCount, setImportedVaultCount] = useState(0);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     useEffect(() => {
         if (mode === 'export') {
-            const code = generateSyncCode(folders, bookmarks, notebooks, notes);
+            const code = generateSyncCode(folders, bookmarks, notebooks, notes, vaultBookmarks);
             setSyncCode(code);
         }
-    }, [mode, folders, bookmarks, notebooks, notes]);
+    }, [mode, folders, bookmarks, notebooks, notes, vaultBookmarks]);
 
     const handleCopy = async () => {
         await navigator.clipboard.writeText(syncCode);
@@ -160,7 +189,12 @@ export const QRSync: React.FC<QRSyncProps> = ({
             return;
         }
 
-        onImport(result.folders, result.bookmarks, result.notebooks, result.notes);
+        // Track vault bookmarks count for notification
+        if (result.vaultBookmarks.length > 0) {
+            setImportedVaultCount(result.vaultBookmarks.length);
+        }
+
+        onImport(result.folders, result.bookmarks, result.notebooks, result.notes, result.vaultBookmarks);
         onClose();
     };
 
@@ -205,7 +239,7 @@ export const QRSync: React.FC<QRSyncProps> = ({
                         <div className="flex items-center justify-between mb-2">
                             <span className="text-sm font-medium text-slate-700">Sync Code</span>
                             <span className="text-xs text-slate-400">
-                                {folders.length} folders, {bookmarks.length} bookmarks
+                                {folders.length} folders, {bookmarks.length} bookmarks{vaultBookmarks.length > 0 ? `, ${vaultBookmarks.length} vault` : ''}
                             </span>
                         </div>
                         <textarea
@@ -225,7 +259,7 @@ export const QRSync: React.FC<QRSyncProps> = ({
                     </button>
 
                     <div className="bg-amber-50 border border-amber-100 rounded-lg p-3 text-sm text-amber-700">
-                        <strong>Note:</strong> This code contains all your bookmarks. Only share with devices you trust.
+                        <strong>Note:</strong> This code contains all your bookmarks{vaultBookmarks.length > 0 ? ' including vault data' : ''}. Only share with devices you trust.
                     </div>
                 </>
             ) : (
@@ -269,6 +303,7 @@ export const QRSync: React.FC<QRSyncProps> = ({
 
                     <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm text-blue-700">
                         <strong>Tip:</strong> This will merge with your existing bookmarks. Duplicates will be skipped.
+                        {!hasVaultPin && <span className="block mt-1 text-purple-600">🔒 If synced data includes vault bookmarks, set up Ghost Vault first to access them.</span>}
                     </div>
                 </>
             )}

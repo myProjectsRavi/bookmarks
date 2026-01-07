@@ -1286,23 +1286,40 @@ function App() {
                     onTagClick={handleTagClick}
                     onSaveSnapshot={handleSaveSnapshot}
                     onViewSnapshot={handleViewSnapshot}
+                    isVaultMode={isVaultMode && isVaultUnlocked}
                     onMoveToVault={async (bm) => {
-                      if (!hasVaultPin) {
-                        showToast('Set up Ghost Vault first from the sidebar', 'error');
-                        return;
+                      if (isVaultMode && isVaultUnlocked) {
+                        // MOVE OUT of vault - restore to normal bookmarks
+                        const newVaultBookmarks = vaultBookmarks.filter(b => b.id !== bm.id);
+                        setVaultBookmarks(newVaultBookmarks);
+                        // Add back to normal bookmarks
+                        setBookmarks([...bookmarks, bm]);
+                        // Save updated vault to localStorage
+                        try {
+                          localStorage.setItem('lh_vault_bookmarks', JSON.stringify(newVaultBookmarks));
+                        } catch (e) {
+                          console.error('Vault save error:', e);
+                        }
+                        showToast(`"${bm.title}" restored from Ghost Vault!`, 'success');
+                      } else {
+                        // MOVE TO vault
+                        if (!hasVaultPin) {
+                          showToast('Set up Ghost Vault first from the sidebar', 'error');
+                          return;
+                        }
+                        // Move bookmark to vault
+                        const newVaultBookmarks = [...vaultBookmarks, bm];
+                        setVaultBookmarks(newVaultBookmarks);
+                        // Remove from normal bookmarks
+                        setBookmarks(bookmarks.filter(b => b.id !== bm.id));
+                        // Save vault bookmarks to localStorage
+                        try {
+                          localStorage.setItem('lh_vault_bookmarks', JSON.stringify(newVaultBookmarks));
+                        } catch (e) {
+                          console.error('Vault save error:', e);
+                        }
+                        showToast(`"${bm.title}" moved to Ghost Vault!`, 'success');
                       }
-                      // Move bookmark to vault
-                      const newVaultBookmarks = [...vaultBookmarks, bm];
-                      setVaultBookmarks(newVaultBookmarks);
-                      // Remove from normal bookmarks
-                      setBookmarks(bookmarks.filter(b => b.id !== bm.id));
-                      // Save vault bookmarks to localStorage
-                      try {
-                        localStorage.setItem('lh_vault_bookmarks', JSON.stringify(newVaultBookmarks));
-                      } catch (e) {
-                        console.error('Vault save error:', e);
-                      }
-                      showToast(`"${bm.title}" moved to Ghost Vault!`, 'success');
                     }}
                     onShowCitation={(bm) => {
                       setCitationBookmark(bm);
@@ -1540,25 +1557,46 @@ function App() {
           bookmarks={bookmarks}
           notebooks={notebooks}
           notes={notes}
-          onImport={(importedFolders, importedBookmarks, importedNotebooks, importedNotes) => {
+          vaultBookmarks={vaultBookmarks}
+          hasVaultPin={hasVaultPin}
+          onImport={(importedFolders, importedBookmarks, importedNotebooks, importedNotes, importedVaultBookmarks) => {
             // Merge imported data (skip duplicates by ID)
             const existingFolderIds = new Set(folders.map(f => f.id));
             const existingBookmarkIds = new Set(bookmarks.map(b => b.id));
             const existingNotebookIds = new Set(notebooks.map(n => n.id));
             const existingNoteIds = new Set(notes.map(n => n.id));
+            const existingVaultIds = new Set(vaultBookmarks.map(b => b.id));
 
             const newFolders = importedFolders.filter(f => !existingFolderIds.has(f.id));
             const newBookmarks = importedBookmarks.filter(b => !existingBookmarkIds.has(b.id));
             const newNotebooks = (importedNotebooks || []).filter(n => !existingNotebookIds.has(n.id));
             const newNotes = (importedNotes || []).filter(n => !existingNoteIds.has(n.id));
+            const newVaultBookmarks = (importedVaultBookmarks || []).filter(b => !existingVaultIds.has(b.id));
 
             setFolders([...folders, ...newFolders]);
             setBookmarks([...bookmarks, ...newBookmarks]);
             if (newNotebooks.length > 0) setNotebooks([...notebooks, ...newNotebooks]);
             if (newNotes.length > 0) setNotes([...notes, ...newNotes]);
 
-            const importedCount = newFolders.length + newBookmarks.length + newNotebooks.length + newNotes.length;
-            showToast(`Imported ${newFolders.length} folders, ${newBookmarks.length} bookmarks, ${newNotebooks.length} notebooks, ${newNotes.length} notes`, 'success');
+            // Merge vault bookmarks and save to localStorage
+            if (newVaultBookmarks.length > 0) {
+              const mergedVault = [...vaultBookmarks, ...newVaultBookmarks];
+              setVaultBookmarks(mergedVault);
+              localStorage.setItem('lh_vault_bookmarks', JSON.stringify(mergedVault));
+            }
+
+            const importedCount = newFolders.length + newBookmarks.length + newNotebooks.length + newNotes.length + newVaultBookmarks.length;
+            let msg = `Imported ${newFolders.length} folders, ${newBookmarks.length} bookmarks`;
+            if (newNotebooks.length > 0 || newNotes.length > 0) {
+              msg += `, ${newNotebooks.length} notebooks, ${newNotes.length} notes`;
+            }
+            if (newVaultBookmarks.length > 0) {
+              msg += `, ${newVaultBookmarks.length} vault bookmarks`;
+              if (!hasVaultPin) {
+                msg += ' (set up Ghost Vault to access them)';
+              }
+            }
+            showToast(msg, 'success');
           }}
           onClose={() => setModalType(null)}
         />
