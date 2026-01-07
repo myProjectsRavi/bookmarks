@@ -25,6 +25,8 @@ import { RulesManager } from './components/RulesManager';
 import { CitationView } from './components/CitationView';
 import { DuplicateFinder } from './components/DuplicateFinder';
 import { VaultPinModal } from './components/VaultPinModal';
+import { BackupConfigModal } from './components/BackupConfigModal';
+import { useAutoBackup } from './hooks/useAutoBackup';
 import { parseImportFile } from './utils/importers';
 import { fetchUrlMetadata } from './utils/metadata';
 import { checkMultipleLinks } from './utils/linkChecker';
@@ -131,6 +133,10 @@ function App() {
   const [showVaultPinModal, setShowVaultPinModal] = useState(false);
   const [vaultPinMode, setVaultPinMode] = useState<'setup' | 'unlock'>('setup');
   const hasVaultPin = !!localStorage.getItem('lh_vault_canary');
+
+  // Auto Backup State
+  const autoBackup = useAutoBackup();
+  const [showBackupModal, setShowBackupModal] = useState(false);
 
   // Health Check State
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
@@ -241,6 +247,20 @@ function App() {
       saveData(folders, bookmarks, notebooks, notes, trash);
     }
   }, [folders, bookmarks, notebooks, notes, trash, dataLoaded, saveData]);
+
+  // Sync data to auto backup
+  useEffect(() => {
+    if (dataLoaded && autoBackup.isEnabled) {
+      autoBackup.updateData({
+        folders,
+        bookmarks,
+        notebooks,
+        notes,
+        vaultBookmarks,
+        rules: rulesEngine.rules,
+      });
+    }
+  }, [folders, bookmarks, notebooks, notes, vaultBookmarks, rulesEngine.rules, dataLoaded, autoBackup.isEnabled]);
 
   // Handle URL params for bookmarklet
   useEffect(() => {
@@ -1153,6 +1173,12 @@ function App() {
               setShowVaultPinModal(true);
             }
           }}
+          // Auto Backup
+          backupEnabled={autoBackup.isEnabled}
+          backupDirectoryName={autoBackup.directoryName}
+          backupTimeSince={autoBackup.getTimeSinceBackup()}
+          backupStatus={autoBackup.backupStatus}
+          onShowBackupConfig={() => setShowBackupModal(true)}
         />
       </div>
 
@@ -1970,6 +1996,59 @@ function App() {
             return false;
           }
         }}
+      />
+
+      {/* Smart Backup Config Modal */}
+      <BackupConfigModal
+        isOpen={showBackupModal}
+        onClose={() => setShowBackupModal(false)}
+        isSupported={autoBackup.isSupported}
+        isEnabled={autoBackup.isEnabled}
+        hasDirectoryAccess={autoBackup.hasDirectoryAccess}
+        directoryName={autoBackup.directoryName}
+        lastBackupTime={autoBackup.lastBackupTime}
+        backupStatus={autoBackup.backupStatus}
+        errorMessage={autoBackup.errorMessage}
+        onSelectFolder={async () => {
+          const success = await autoBackup.selectBackupFolder();
+          if (success) {
+            // Trigger immediate backup with current data
+            autoBackup.updateData({
+              folders,
+              bookmarks,
+              notebooks,
+              notes,
+              vaultBookmarks,
+              rules: rulesEngine.rules,
+            });
+            showToast('Backup folder selected! Auto-saving every 5 minutes.', 'success');
+          }
+          return success;
+        }}
+        onBackupNow={autoBackup.backupNow}
+        onDisableBackup={() => {
+          autoBackup.disableBackup();
+          showToast('Auto-backup disabled.', 'success');
+        }}
+        onRestoreFile={async (file) => {
+          const data = await autoBackup.parseBackupFile(file);
+          if (data) {
+            // Restore all data
+            setFolders(data.folders || []);
+            setBookmarks(data.bookmarks || []);
+            setNotebooks(data.notebooks || []);
+            setNotes(data.notes || []);
+            if (data.vaultBookmarks?.length > 0) {
+              setVaultBookmarks(data.vaultBookmarks);
+              localStorage.setItem('lh_vault_bookmarks', JSON.stringify(data.vaultBookmarks));
+            }
+            showToast(`Restored ${data.bookmarks?.length || 0} bookmarks and ${data.folders?.length || 0} folders!`, 'success');
+            return true;
+          }
+          showToast('Failed to restore backup file.', 'error');
+          return false;
+        }}
+        getTimeSinceBackup={autoBackup.getTimeSinceBackup}
       />
 
     </div>

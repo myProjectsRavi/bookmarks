@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import {
   Folder as FolderIcon, Layers, Plus, FolderOpen, Trash2, Download,
   UploadCloud, Database, Bookmark, Activity, FileUp, Zap,
-  Copy, Sparkles, Smartphone, FileText, BookOpen, Network, ChevronDown, ChevronRight, Crown, Ghost, Lock, Unlock
+  Copy, Sparkles, Smartphone, FileText, BookOpen, Network, ChevronDown, ChevronRight, Crown, Ghost, Lock, Unlock, Cloud, Check
 } from 'lucide-react';
 import { Folder, Notebook, MainView } from '../types';
 
@@ -43,6 +43,12 @@ interface SidebarProps {
   hasVaultPin?: boolean;
   vaultBookmarkCount?: number;
   onToggleVault?: () => void;
+  // Auto Backup
+  backupEnabled?: boolean;
+  backupDirectoryName?: string;
+  backupTimeSince?: string;
+  backupStatus?: 'idle' | 'saving' | 'error' | 'success';
+  onShowBackupConfig?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -82,6 +88,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   hasVaultPin = false,
   vaultBookmarkCount = 0,
   onToggleVault,
+  // Auto Backup
+  backupEnabled = false,
+  backupDirectoryName = '',
+  backupTimeSince = '',
+  backupStatus = 'idle',
+  onShowBackupConfig,
 }) => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -444,8 +456,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <button
               onClick={onToggleVault}
               className={`w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-lg transition-all duration-200 ${isVaultMode
-                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                  : 'hover:bg-slate-800/50 hover:text-white text-slate-400'
+                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                : 'hover:bg-slate-800/50 hover:text-white text-slate-400'
                 }`}
             >
               <div className="flex items-center gap-3">
@@ -480,6 +492,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>Data</span>
           </h3>
           <div className="space-y-1">
+            {/* Smart Backup Status */}
+            {onShowBackupConfig && (
+              <button
+                onClick={onShowBackupConfig}
+                className={`w-full flex items-center justify-between px-3 py-2.5 text-sm rounded-lg transition-all duration-200 ${backupEnabled
+                    ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                  }`}
+              >
+                <div className="flex items-center gap-3">
+                  <Cloud size={16} className={backupEnabled ? 'text-emerald-400' : 'text-slate-500'} />
+                  <span>Smart Backup</span>
+                </div>
+                {backupEnabled ? (
+                  <div className="flex items-center gap-1.5">
+                    {backupStatus === 'saving' ? (
+                      <span className="text-[10px] text-emerald-400 animate-pulse">Saving...</span>
+                    ) : (
+                      <>
+                        <Check size={12} className="text-emerald-400" />
+                        <span className="text-[10px] text-emerald-400">{backupTimeSince}</span>
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700 text-slate-400">Setup</span>
+                )}
+              </button>
+            )}
             <button
               onClick={() => browserImportRef.current?.click()}
               className="w-full flex items-center gap-3 px-3 py-2 text-sm text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg transition-colors"

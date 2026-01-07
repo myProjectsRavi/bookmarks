@@ -60,6 +60,10 @@ ModalType    // Union of all modal identifiers (~25 types)
 | Notebook Sync | `NotebookSync.tsx` | Notes-only sync code |
 | Deduplication | `DeduplicationWizard.tsx` | Find duplicate bookmarks |
 | Snapshots | `SnapshotCapture.tsx` | Page snapshots (Eternal Vault) |
+| Ghost Vault | `VaultPinModal.tsx` | Hidden bookmarks with separate PIN |
+| Smart Auto-Backup | `BackupConfigModal.tsx` | 5-min auto-backup to user folder |
+| Smart Rules | `RulesManager.tsx` | Auto-tag/move based on URL patterns |
+| Citations | `CitationView.tsx` | Generate academic citations |
 
 ---
 
@@ -251,19 +255,30 @@ User Action → Event Handler → State Update → Re-render
 │   ├── KnowledgeGraph.tsx   # Connection Map visualization
 │   ├── TrashView.tsx        # 7-day trash recovery
 │   ├── VersionHistory.tsx   # Note version history
+│   ├── VaultPinModal.tsx    # Ghost Vault PIN setup/unlock
+│   ├── BackupConfigModal.tsx # Smart Backup folder config
+│   ├── RulesManager.tsx     # Smart Rules automation
+│   ├── CitationView.tsx     # Academic citation generator
 │   └── ...
 ├── hooks/
 │   ├── index.ts             # Central export
 │   ├── useStorage.ts        # Encrypted localStorage
 │   ├── useAuth.ts           # PIN/session management
 │   ├── useToast.ts          # Toast notifications
-│   └── useKeyboardShortcuts.ts
+│   ├── useKeyboardShortcuts.ts
+│   ├── useAutoBackup.ts     # File System API auto-backup
+│   ├── useRules.ts          # Smart Rules engine
+│   ├── useCitations.ts      # Citation metadata fetching
+│   └── useGhostVault.ts     # Ghost Vault state
 └── utils/
     ├── crypto.ts            # AES-256-GCM encryption
     ├── importers.ts         # File import parsing
     ├── metadata.ts          # URL metadata fetching
     ├── linkChecker.ts       # Dead link detection
     ├── SnapshotDB.ts        # IndexedDB for snapshots
+    ├── ruleEngine.ts        # Smart Rules logic
+    ├── citationParser.ts    # Citation metadata parser
+    ├── citationFormatter.ts # APA/MLA/Chicago formatting
     ├── contentExtractor.ts  # Readability.js extraction
     └── graphBuilder.ts      # Knowledge graph builder
 ```
@@ -300,6 +315,17 @@ git add -A && git commit -m "message" && git push origin main
 - [ ] Rich text editor for notes (currently plain text)
 - [ ] Image attachments in notes
 - [ ] PDF export for notes
-- [ ] Cross-device sync via cloud
+- [x] Cross-device sync via cloud (QR Sync + Smart Auto-Backup)
 - [x] Browser extension for quick save (see TODOs.md)
+- [x] Ghost Vault - Hidden bookmarks with separate PIN
+- [x] Smart Rules - Auto-tagging based on URL patterns
+- [x] Citation Generator - APA/MLA/Chicago/Harvard formats
+
+## Recent Updates (Jan 2026)
+
+- **Smart Auto-Backup**: File System API auto-saves to user folder every 5 min
+- **Ghost Vault**: Hidden bookmarks with separate PIN protection
+- **Smart Rules**: Automatic tagging/moving based on URL patterns
+- **Citations**: Generate academic citations from bookmarks
+- **QR Sync**: Includes vault bookmarks in sync code
 
