@@ -24,6 +24,7 @@ interface SidebarProps {
   onShowDeduplication?: () => void;
   onShowSync?: () => void;
   onShowPremium?: () => void;
+  onShowRules?: () => void;
   isPremium?: boolean;
   // Notes features
   notebooks?: Notebook[];
@@ -57,6 +58,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onShowDeduplication,
   onShowSync,
   onShowPremium,
+  onShowRules,
   isPremium = true,
   // Notes
   notebooks = [],
@@ -407,6 +409,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 >
                   <Smartphone size={16} />
                   <span>Sync Devices</span>
+                </button>
+              )}
+              {onShowRules && (
+                <button
+                  onClick={onShowRules}
+                  className="w-full flex items-center gap-3 px-3 py-2 text-sm text-slate-400 hover:text-white hover:bg-slate-800/50 rounded-lg transition-colors"
+                >
+                  <Zap size={16} />
+                  <span>Smart Rules</span>
                 </button>
               )}
             </div>

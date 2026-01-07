@@ -109,6 +109,10 @@ export type ModalType =
   | 'VIEW_NOTE'
   | 'SHARE_NOTE'
   | 'UNLOCK_NOTE'
+  // Premium Features
+  | 'RULES_BUILDER'
+  | 'CITATION_VIEW'
+  | 'DUPLICATE_FINDER'
   | null;
 
 // Main view types

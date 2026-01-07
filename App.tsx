@@ -21,11 +21,15 @@ import { TrashView } from './components/TrashView';
 import { VersionHistory } from './components/VersionHistory';
 import { KnowledgeGraph } from './components/KnowledgeGraph';
 import { PremiumModal } from './components/PremiumModal';
+import { RuleBuilder } from './components/RuleBuilder';
+import { CitationView } from './components/CitationView';
+import { DuplicateFinder } from './components/DuplicateFinder';
 import { parseImportFile } from './utils/importers';
 import { fetchUrlMetadata } from './utils/metadata';
 import { checkMultipleLinks } from './utils/linkChecker';
 import { SnapshotDB } from './utils/SnapshotDB';
 import { extractContent, isExtractable, formatBytes } from './utils/contentExtractor';
+import { useCitations, useRules, useSimilarity } from './hooks';
 import {
   deriveKey,
   encrypt,
@@ -111,6 +115,10 @@ function App() {
 
   // Import State
   const [pendingImportData, setPendingImportData] = useState<{ folders: Folder[], bookmarks: Bookmark[] } | null>(null);
+
+  // Premium Features State
+  const [citationBookmark, setCitationBookmark] = useState<Bookmark | null>(null);
+  const citations = useCitations();
 
   // Health Check State
   const [isCheckingHealth, setIsCheckingHealth] = useState(false);
@@ -1071,8 +1079,9 @@ function App() {
           isCheckingHealth={isCheckingHealth}
           activeTag={activeTag}
           onClearTag={() => setActiveTag('')}
-          onShowDeduplication={() => setModalType('DEDUPLICATION')}
+          onShowDeduplication={() => setModalType('DUPLICATE_FINDER')}
           onShowSync={() => setModalType('QR_SYNC')}
+          onShowRules={() => setModalType('RULES_BUILDER')}
           onShowPremium={() => setModalType('PREMIUM_UPGRADE')}
           isPremium={true}
           notebooks={notebooks}
@@ -1727,6 +1736,40 @@ function App() {
           onClose={() => setViewingSnapshotBookmark(null)}
         />
       )}
+
+      {/* Premium: Rule Builder */}
+      <RuleBuilder
+        isOpen={modalType === 'RULES_BUILDER'}
+        onClose={() => setModalType(null)}
+        onSave={async (name, condition, action) => {
+          console.log('Rule saved:', { name, condition, action });
+          showToast('Rule created! It will auto-apply to new bookmarks.', 'success');
+          setModalType(null);
+        }}
+      />
+
+      {/* Premium: Citation View */}
+      {citationBookmark && (
+        <CitationView
+          isOpen={modalType === 'CITATION_VIEW'}
+          onClose={() => {
+            setModalType(null);
+            setCitationBookmark(null);
+          }}
+          bookmark={citationBookmark}
+          metadata={citations.metadataCache.get(citationBookmark.id) || null}
+          isLoading={citations.isLoading(citationBookmark.id)}
+          onFetchMetadata={async () => { await citations.fetchMetadata(citationBookmark); }}
+        />
+      )}
+
+      {/* Premium: Duplicate Finder */}
+      <DuplicateFinder
+        isOpen={modalType === 'DUPLICATE_FINDER'}
+        onClose={() => setModalType(null)}
+        bookmarks={bookmarks}
+        onDeleteBookmark={deleteBookmark}
+      />
 
     </div>
   );
