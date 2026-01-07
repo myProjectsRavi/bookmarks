@@ -283,7 +283,8 @@ function App() {
   }, [notes]);
 
   const filteredBookmarks = useMemo(() => {
-    let result = bookmarks;
+    // In vault mode, show vault bookmarks instead of normal bookmarks
+    let result = (isVaultMode && isVaultUnlocked) ? vaultBookmarks : bookmarks;
 
     // Tag Filter
     if (activeTag) {
@@ -303,14 +304,14 @@ function App() {
       }).sort((a, b) => b.createdAt - a.createdAt);
     }
 
-    // Folder Filter (Only if not searching)
-    if (activeFolderId !== 'ALL') {
+    // Folder Filter (Only if not searching and not in vault mode)
+    if (activeFolderId !== 'ALL' && !(isVaultMode && isVaultUnlocked)) {
       result = result.filter(b => b.folderId === activeFolderId);
     }
 
     // Sort by newest
     return result.sort((a, b) => b.createdAt - a.createdAt);
-  }, [bookmarks, activeFolderId, searchQuery, activeTag]);
+  }, [bookmarks, vaultBookmarks, isVaultMode, isVaultUnlocked, activeFolderId, searchQuery, activeTag]);
 
   const bookmarkCounts = useMemo(() => {
     const counts: Record<string, number> = { 'ALL': bookmarks.length };
@@ -1295,13 +1296,9 @@ function App() {
                       setVaultBookmarks(newVaultBookmarks);
                       // Remove from normal bookmarks
                       setBookmarks(bookmarks.filter(b => b.id !== bm.id));
-                      // Save vault bookmarks encrypted
+                      // Save vault bookmarks to localStorage
                       try {
-                        const saltB64 = localStorage.getItem('lh_vault_salt');
-                        if (saltB64) {
-                          // Store as JSON (encryption handled separately)
-                          localStorage.setItem('lh_vault_bookmarks_plain', JSON.stringify(newVaultBookmarks));
-                        }
+                        localStorage.setItem('lh_vault_bookmarks', JSON.stringify(newVaultBookmarks));
                       } catch (e) {
                         console.error('Vault save error:', e);
                       }
@@ -1922,9 +1919,7 @@ function App() {
               const vaultData = localStorage.getItem('lh_vault_bookmarks');
               if (vaultData) {
                 try {
-                  const encrypted = vaultData;
-                  const decrypted = await decrypt(encrypted, key);
-                  setVaultBookmarks(JSON.parse(decrypted));
+                  setVaultBookmarks(JSON.parse(vaultData));
                 } catch {
                   setVaultBookmarks([]);
                 }
