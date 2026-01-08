@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Wifi, Check, X, Loader, Copy, ArrowLeft, Camera, QrCode, Folder as FolderIcon, Zap } from 'lucide-react';
+import { Wifi, Check, X, Loader, Copy, ArrowLeft, Camera, QrCode, Zap } from 'lucide-react';
 import { Folder, Bookmark, Notebook, Note } from '../types';
 import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
@@ -25,10 +25,21 @@ interface P2PSyncModalProps {
 
 type SyncMode = 'select' | 'send' | 'receive';
 
+// STUN servers for better NAT traversal
+const ICE_SERVERS = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+    ]
+};
+
 // Generate a short readable peer ID
 function generatePeerId(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // No confusing chars (0/O, 1/I/L)
-    let id = 'LH-';
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let id = 'LH';
     for (let i = 0; i < 6; i++) {
         id += chars[Math.floor(Math.random() * chars.length)];
     }
@@ -58,15 +69,17 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
     const peerRef = useRef<Peer | null>(null);
     const connectionRef = useRef<DataConnection | null>(null);
     const scannerRef = useRef<Html5Qrcode | null>(null);
+    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-    // Cleanup on unmount
     useEffect(() => {
-        return () => {
-            cleanup();
-        };
+        return () => cleanup();
     }, []);
 
     const cleanup = () => {
+        if (timeoutRef.current) {
+            clearTimeout(timeoutRef.current);
+            timeoutRef.current = null;
+        }
         if (scannerRef.current) {
             scannerRef.current.stop().catch(() => { });
             scannerRef.current = null;
@@ -81,8 +94,9 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
         }
     };
 
-    // SENDER: Start hosting and wait for connection
+    // SENDER: Start hosting
     const startSender = async () => {
+        cleanup();
         setStatus('waiting');
         setStatusMessage('Creating connection...');
 
@@ -91,14 +105,23 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
 
         try {
             const peer = new Peer(id, {
-                debug: 0, // Minimal logging
+                debug: 1,
+                config: ICE_SERVERS
             });
             peerRef.current = peer;
 
-            peer.on('open', async (openedId) => {
-                setStatusMessage('Ready! Scan QR or enter code on other device');
+            // Timeout for peer connection
+            timeoutRef.current = setTimeout(() => {
+                if (status === 'waiting' && !qrDataUrl) {
+                    setStatus('error');
+                    setStatusMessage('Connection timeout. Please try again.');
+                }
+            }, 15000);
 
-                // Generate QR with just the peer ID
+            peer.on('open', async (openedId) => {
+                if (timeoutRef.current) clearTimeout(timeoutRef.current);
+                setStatusMessage('Ready! Share this code with other device');
+
                 const qr = await QRCode.toDataURL(openedId, {
                     width: 280,
                     margin: 2,
@@ -111,10 +134,9 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
             peer.on('connection', (conn) => {
                 connectionRef.current = conn;
                 setStatus('connected');
-                setStatusMessage('Device connected! Sending data...');
+                setStatusMessage('Device connected! Sending...');
 
                 conn.on('open', () => {
-                    // Send all data
                     const payload = {
                         type: 'linkhaven-sync',
                         folders,
@@ -126,30 +148,39 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
 
                     setStatus('transferring');
                     setProgress(50);
-
                     conn.send(JSON.stringify(payload));
-
                     setProgress(100);
                     setStatus('done');
                     setStatusMessage(`✨ Sent ${bookmarks.length} bookmarks!`);
                 });
 
                 conn.on('error', (err) => {
-                    setStatus('error');
-                    setStatusMessage('Connection error');
                     console.error('Connection error:', err);
+                    setStatus('error');
+                    setStatusMessage('Transfer failed. Try again.');
                 });
             });
 
             peer.on('error', (err) => {
                 console.error('Peer error:', err);
+                if (timeoutRef.current) clearTimeout(timeoutRef.current);
+
                 if (err.type === 'unavailable-id') {
-                    // ID already in use, try again
-                    cleanup();
-                    startSender();
+                    // ID collision, retry
+                    setTimeout(() => startSender(), 500);
+                } else if (err.type === 'network' || err.type === 'server-error') {
+                    setStatus('error');
+                    setStatusMessage('Network error. Check your connection.');
                 } else {
                     setStatus('error');
                     setStatusMessage('Connection failed. Try again.');
+                }
+            });
+
+            peer.on('disconnected', () => {
+                // Try to reconnect
+                if (peerRef.current && status !== 'done') {
+                    peerRef.current.reconnect();
                 }
             });
 
@@ -161,30 +192,59 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
 
     // RECEIVER: Connect to sender
     const connectToSender = (senderId: string) => {
-        const cleanId = senderId.trim().toUpperCase();
-        if (!cleanId) {
-            onError('Please enter a code');
+        let cleanId = senderId.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+        // Add LH prefix if missing
+        if (!cleanId.startsWith('LH') && cleanId.length === 6) {
+            cleanId = 'LH' + cleanId;
+        }
+
+        if (cleanId.length < 8) {
+            onError('Code must be 8 characters (e.g., LH-A7X9KP)');
             return;
         }
 
+        cleanup();
         setStatus('waiting');
         setStatusMessage('Connecting...');
         setIsScanning(false);
 
+        // Connection timeout
+        timeoutRef.current = setTimeout(() => {
+            if (status === 'waiting') {
+                setStatus('error');
+                setStatusMessage('Connection timeout. Check the code and try again.');
+            }
+        }, 20000);
+
         const peer = new Peer({
-            debug: 0,
+            debug: 1,
+            config: ICE_SERVERS
         });
         peerRef.current = peer;
 
         peer.on('open', () => {
             setStatusMessage('Connecting to sender...');
 
-            const conn = peer.connect(cleanId, { reliable: true });
+            const conn = peer.connect(cleanId, {
+                reliable: true,
+                serialization: 'json'
+            });
             connectionRef.current = conn;
 
+            // Connection open timeout
+            const connTimeout = setTimeout(() => {
+                if (status === 'waiting') {
+                    setStatus('error');
+                    setStatusMessage('Could not reach sender. Check the code is correct.');
+                }
+            }, 15000);
+
             conn.on('open', () => {
+                clearTimeout(connTimeout);
+                if (timeoutRef.current) clearTimeout(timeoutRef.current);
                 setStatus('connected');
-                setStatusMessage('Connected! Waiting for data...');
+                setStatusMessage('Connected! Receiving data...');
             });
 
             conn.on('data', (data) => {
@@ -192,6 +252,7 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                     const payload = typeof data === 'string' ? JSON.parse(data) : data;
 
                     if (payload.type === 'linkhaven-sync') {
+                        if (timeoutRef.current) clearTimeout(timeoutRef.current);
                         setStatus('done');
                         setProgress(100);
 
@@ -212,24 +273,38 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                         }, 1500);
                     }
                 } catch (e) {
+                    console.error('Parse error:', e);
                     setStatus('error');
                     setStatusMessage('Failed to parse data');
                 }
             });
 
-            conn.on('error', () => {
+            conn.on('error', (err) => {
+                console.error('Conn error:', err);
+                clearTimeout(connTimeout);
                 setStatus('error');
-                setStatusMessage('Connection failed');
+                setStatusMessage('Connection dropped. Try again.');
+            });
+
+            conn.on('close', () => {
+                if (status !== 'done') {
+                    setStatus('error');
+                    setStatusMessage('Connection closed unexpectedly.');
+                }
             });
         });
 
         peer.on('error', (err) => {
             console.error('Peer error:', err);
+            if (timeoutRef.current) clearTimeout(timeoutRef.current);
             setStatus('error');
+
             if (err.type === 'peer-unavailable') {
-                setStatusMessage('Code not found. Check the code and try again.');
+                setStatusMessage('Code not found. Make sure sender is showing the code.');
+            } else if (err.type === 'network') {
+                setStatusMessage('Network error. Check your internet connection.');
             } else {
-                setStatusMessage('Connection failed. Check network.');
+                setStatusMessage(`Connection failed: ${err.type}`);
             }
         });
     };
@@ -284,7 +359,7 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                 </div>
                 <div>
                     <h3 className="text-lg font-bold text-slate-800">WiFi Sync</h3>
-                    <p className="text-sm text-slate-500">Direct device-to-device transfer</p>
+                    <p className="text-sm text-slate-500">Direct P2P transfer</p>
                 </div>
             </div>
 
@@ -293,10 +368,10 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                 <div className="space-y-4">
                     <div className="bg-gradient-to-r from-cyan-50 to-blue-50 border border-cyan-100 rounded-lg p-4 text-sm">
                         <p className="font-medium text-cyan-800 flex items-center gap-2">
-                            <Zap size={16} /> Instant WiFi Sync
+                            <Zap size={16} /> Instant Sync
                         </p>
                         <p className="text-cyan-600 mt-1">
-                            Sync {totalItems}+ items instantly. Both devices need internet.
+                            Transfer {totalItems}+ items instantly via secure peer connection.
                         </p>
                     </div>
 
@@ -326,7 +401,7 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                             </div>
                             <div className="text-center">
                                 <div className="font-semibold text-slate-800">Receive</div>
-                                <div className="text-xs text-slate-500 mt-1">Scan code</div>
+                                <div className="text-xs text-slate-500 mt-1">Enter code</div>
                             </div>
                         </button>
                     </div>
@@ -336,7 +411,6 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
             {/* SEND Mode */}
             {mode === 'send' && (
                 <div className="space-y-4">
-                    {/* Data summary */}
                     <div className="bg-slate-50 rounded-lg p-3 text-sm">
                         <div className="flex flex-wrap gap-2">
                             <span className="px-2 py-1 bg-white rounded border text-xs">
@@ -353,7 +427,6 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                         </div>
                     </div>
 
-                    {/* Status */}
                     {status === 'waiting' && !qrDataUrl && (
                         <div className="flex flex-col items-center py-8 gap-4">
                             <Loader size={40} className="animate-spin text-cyan-500" />
@@ -364,38 +437,36 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                     {status === 'waiting' && qrDataUrl && (
                         <div className="space-y-4">
                             <div className="flex justify-center p-4 bg-white border-2 border-slate-200 rounded-xl">
-                                <img src={qrDataUrl} alt="Sync QR" className="w-56 h-56" />
+                                <img src={qrDataUrl} alt="Sync QR" className="w-48 h-48" />
                             </div>
 
-                            <div className="text-center">
-                                <div className="text-2xl font-mono font-bold text-slate-800 tracking-wider">
-                                    {peerId}
+                            <div className="text-center space-y-2">
+                                <div className="text-3xl font-mono font-bold text-slate-800 tracking-widest">
+                                    {peerId.slice(0, 2)}-{peerId.slice(2)}
                                 </div>
-                                <p className="text-sm text-slate-500 mt-2">
-                                    📱 Scan QR or enter this code on other device
+                                <p className="text-sm text-slate-500">
+                                    Enter this code on your other device
                                 </p>
                             </div>
+
+                            <button
+                                onClick={async () => {
+                                    await navigator.clipboard.writeText(peerId);
+                                    onSuccess('Code copied!');
+                                }}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg"
+                            >
+                                <Copy size={14} /> Copy Code
+                            </button>
                         </div>
                     )}
 
-                    {status === 'connected' && (
-                        <div className="flex flex-col items-center py-8 gap-4">
-                            <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center">
-                                <Check size={32} className="text-emerald-600" />
-                            </div>
-                            <p className="text-sm text-slate-600">{statusMessage}</p>
-                        </div>
-                    )}
-
-                    {status === 'transferring' && (
+                    {(status === 'connected' || status === 'transferring') && (
                         <div className="flex flex-col items-center py-8 gap-4">
                             <Loader size={40} className="animate-spin text-cyan-500" />
-                            <p className="text-sm text-slate-600">Sending data...</p>
+                            <p className="text-sm text-slate-600">{statusMessage}</p>
                             <div className="w-full bg-slate-200 rounded-full h-2">
-                                <div
-                                    className="bg-cyan-500 h-2 rounded-full transition-all"
-                                    style={{ width: `${progress}%` }}
-                                />
+                                <div className="bg-cyan-500 h-2 rounded-full transition-all" style={{ width: `${progress}%` }} />
                             </div>
                         </div>
                     )}
@@ -414,11 +485,12 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
                                 <X size={32} className="text-red-600" />
                             </div>
-                            <p className="text-sm text-red-600">{statusMessage}</p>
+                            <p className="text-sm text-red-600 text-center">{statusMessage}</p>
                             <button
                                 onClick={() => {
                                     cleanup();
                                     setStatus('idle');
+                                    setQrDataUrl('');
                                     startSender();
                                 }}
                                 className="px-4 py-2 text-sm bg-slate-100 hover:bg-slate-200 rounded-lg"
@@ -435,53 +507,48 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                 <div className="space-y-4">
                     {status === 'idle' && !isScanning && (
                         <>
-                            <button
-                                onClick={startScanner}
-                                className="w-full flex flex-col items-center gap-3 p-8 border-2 border-dashed border-slate-300 rounded-xl hover:border-cyan-500 hover:bg-cyan-50/50 transition-all"
-                            >
-                                <Camera size={48} className="text-cyan-600" />
-                                <div className="text-center">
-                                    <div className="font-semibold text-slate-800">Scan QR Code</div>
-                                    <div className="text-xs text-slate-500 mt-1">Point camera at sender's screen</div>
-                                </div>
-                            </button>
-
-                            <div className="flex items-center gap-2">
-                                <div className="flex-1 border-t border-slate-200"></div>
-                                <span className="text-xs text-slate-400">or enter code</span>
-                                <div className="flex-1 border-t border-slate-200"></div>
+                            <div className="text-sm text-slate-600 text-center mb-2">
+                                Enter the code shown on the sending device
                             </div>
 
                             <div className="flex gap-2">
                                 <input
                                     type="text"
                                     value={inputCode}
-                                    onChange={(e) => setInputCode(e.target.value.toUpperCase())}
-                                    placeholder="LH-XXXXXX"
-                                    className="flex-1 px-4 py-3 text-center font-mono text-lg font-bold tracking-wider border-2 border-slate-200 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none"
-                                    maxLength={9}
+                                    onChange={(e) => setInputCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                                    placeholder="LHXXXXXX"
+                                    className="flex-1 px-4 py-3 text-center font-mono text-xl font-bold tracking-widest border-2 border-slate-200 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none"
+                                    maxLength={8}
                                 />
-                                <button
-                                    onClick={() => connectToSender(inputCode)}
-                                    disabled={inputCode.length < 8}
-                                    className="px-6 py-3 bg-cyan-600 text-white font-medium rounded-lg hover:bg-cyan-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
-                                >
-                                    Connect
-                                </button>
                             </div>
+
+                            <button
+                                onClick={() => connectToSender(inputCode)}
+                                disabled={inputCode.length < 8}
+                                className="w-full px-6 py-3 bg-cyan-600 text-white font-semibold rounded-lg hover:bg-cyan-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
+                            >
+                                Connect
+                            </button>
+
+                            <div className="flex items-center gap-2 my-4">
+                                <div className="flex-1 border-t border-slate-200"></div>
+                                <span className="text-xs text-slate-400">or scan QR</span>
+                                <div className="flex-1 border-t border-slate-200"></div>
+                            </div>
+
+                            <button
+                                onClick={startScanner}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-slate-300 text-slate-600 rounded-xl hover:border-cyan-500 hover:bg-cyan-50/50 transition-all"
+                            >
+                                <Camera size={20} /> Open Camera
+                            </button>
                         </>
                     )}
 
                     {isScanning && (
                         <div className="space-y-4">
-                            <div
-                                id="qr-scanner-container"
-                                className="w-full aspect-square bg-slate-900 rounded-xl overflow-hidden"
-                            />
-                            <button
-                                onClick={stopScanner}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
-                            >
+                            <div id="qr-scanner-container" className="w-full aspect-square bg-slate-900 rounded-xl overflow-hidden" />
+                            <button onClick={stopScanner} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg">
                                 <X size={16} /> Cancel
                             </button>
                         </div>
@@ -508,7 +575,7 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
                                 <X size={32} className="text-red-600" />
                             </div>
-                            <p className="text-sm text-red-600 text-center">{statusMessage}</p>
+                            <p className="text-sm text-red-600 text-center px-4">{statusMessage}</p>
                             <button
                                 onClick={() => {
                                     cleanup();
@@ -544,9 +611,7 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                     <ArrowLeft size={16} />
                     {mode === 'select' ? 'Cancel' : 'Back'}
                 </button>
-                <div className="text-xs text-slate-400">
-                    P2P encrypted
-                </div>
+                <div className="text-xs text-slate-400">P2P encrypted</div>
             </div>
         </div>
     );
