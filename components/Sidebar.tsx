@@ -41,8 +41,10 @@ interface SidebarProps {
   isVaultMode?: boolean;
   isVaultUnlocked?: boolean;
   hasVaultPin?: boolean;
+  hasPanicPin?: boolean;
   vaultBookmarkCount?: number;
   onToggleVault?: () => void;
+  onSetupPanicPin?: () => void;
   // Auto Backup
   backupEnabled?: boolean;
   backupDirectoryName?: string;
@@ -86,8 +88,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isVaultMode = false,
   isVaultUnlocked = false,
   hasVaultPin = false,
+  hasPanicPin = false,
   vaultBookmarkCount = 0,
   onToggleVault,
+  onSetupPanicPin,
   // Auto Backup
   backupEnabled = false,
   backupDirectoryName = '',
@@ -507,6 +511,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <p className="text-xs text-purple-400/60 mt-1 px-3">
                 👻 Hidden bookmarks are visible
               </p>
+            )}
+
+            {/* Panic PIN Setup - Only show after vault is set up */}
+            {hasVaultPin && onSetupPanicPin && (
+              <button
+                onClick={onSetupPanicPin}
+                className={`w-full mt-2 flex items-center justify-between px-3 py-2 text-sm rounded-lg transition-all duration-200 ${hasPanicPin
+                    ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20'
+                    : 'text-slate-400 hover:text-orange-400 hover:bg-orange-500/10 border border-dashed border-slate-600'
+                  }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-orange-400">🚨</span>
+                  <span>{hasPanicPin ? 'Panic PIN Active' : 'Setup Panic PIN'}</span>
+                </div>
+                {!hasPanicPin && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400">PRO</span>
+                )}
+              </button>
             )}
           </div>
         )}

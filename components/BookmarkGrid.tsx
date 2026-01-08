@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { ExternalLink, Trash2, Globe, Edit2, Tag, AlertCircle, CheckCircle, Loader, Download, Eye, HardDrive, Lock, Unlock, BookOpen } from 'lucide-react';
+import { ExternalLink, Trash2, Globe, Edit2, Tag, AlertCircle, CheckCircle, Loader, Download, Eye, HardDrive, Lock, Unlock, BookOpen, ChevronDown, ChevronRight } from 'lucide-react';
 import { Bookmark, Folder } from '../types';
 import { isAcademicUrl } from '../utils/citationParser';
 
@@ -275,6 +275,20 @@ export const BookmarkGrid: React.FC<BookmarkGridProps> = ({
 }) => {
   const [savingSnapshotIds, setSavingSnapshotIds] = useState<Set<string>>(new Set());
   const [groupBy, setGroupBy] = useState<'none' | 'domain' | 'tag'>('none');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set()); // Track which groups are expanded
+
+  // Toggle group expansion
+  const toggleGroup = useCallback((groupName: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupName)) {
+        next.delete(groupName);
+      } else {
+        next.add(groupName);
+      }
+      return next;
+    });
+  }, []);
 
   // Memoize folder lookup for O(1) access
   const folderMap = useMemo(() => {
@@ -405,21 +419,44 @@ export const BookmarkGrid: React.FC<BookmarkGridProps> = ({
         </div>
       </div>
 
-      {/* Grouped View */}
+      {/* Grouped View with Collapsible Groups */}
       {groupedBookmarks ? (
-        <div className="space-y-6">
-          {groupedBookmarks.map(([groupName, groupBookmarks]) => (
-            <div key={groupName}>
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-700 mb-3 px-1">
-                {groupBy === 'domain' ? <Globe size={14} className="text-amber-500" /> : <Tag size={14} className="text-indigo-500" />}
-                {groupName}
-                <span className="text-xs text-slate-400 font-normal">({groupBookmarks.length})</span>
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {groupBookmarks.map(renderBookmarkCard)}
+        <div className="space-y-2">
+          {groupedBookmarks.map(([groupName, groupBookmarks]) => {
+            const isExpanded = expandedGroups.has(groupName);
+            return (
+              <div key={groupName} className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+                {/* Collapsible Header */}
+                <button
+                  onClick={() => toggleGroup(groupName)}
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    {isExpanded ? (
+                      <ChevronDown size={16} className="text-slate-400" />
+                    ) : (
+                      <ChevronRight size={16} className="text-slate-400" />
+                    )}
+                    {groupBy === 'domain' ? <Globe size={14} className="text-amber-500" /> : <Tag size={14} className="text-indigo-500" />}
+                    <span className="font-semibold text-slate-700">{groupName}</span>
+                    <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full">{groupBookmarks.length}</span>
+                  </div>
+                  <span className="text-xs text-slate-400">
+                    {isExpanded ? 'Click to collapse' : 'Click to expand'}
+                  </span>
+                </button>
+
+                {/* Expanded Content */}
+                {isExpanded && (
+                  <div className="px-4 pb-4 pt-2 border-t border-slate-100 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {groupBookmarks.map(renderBookmarkCard)}
+                    </div>
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         /* Default Grid View */

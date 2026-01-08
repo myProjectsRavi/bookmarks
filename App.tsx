@@ -1213,6 +1213,7 @@ function App() {
           isVaultMode={isVaultMode}
           isVaultUnlocked={isVaultUnlocked}
           hasVaultPin={hasVaultPin}
+          hasPanicPin={ghostVault.isDuressEnabled}
           vaultBookmarkCount={vaultBookmarks.length}
           onToggleVault={() => {
             if (isVaultMode) {
@@ -1228,6 +1229,10 @@ function App() {
               }
               setShowVaultPinModal(true);
             }
+          }}
+          onSetupPanicPin={() => {
+            setVaultPinMode('duress');
+            setShowVaultPinModal(true);
           }}
           // Auto Backup
           backupEnabled={autoBackup.isEnabled}

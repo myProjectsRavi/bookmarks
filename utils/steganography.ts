@@ -237,6 +237,9 @@ export function loadImageToCanvas(file: File): Promise<HTMLCanvasElement> {
  */
 export function downloadCanvasAsPng(canvas: HTMLCanvasElement, filename: string): Promise<void> {
     return new Promise((resolve, reject) => {
+        // Ensure filename ends with .png
+        const pngFilename = filename.endsWith('.png') ? filename : `${filename}.png`;
+
         // Convert canvas to blob for more reliable download
         canvas.toBlob((blob) => {
             if (!blob) {
@@ -244,19 +247,33 @@ export function downloadCanvasAsPng(canvas: HTMLCanvasElement, filename: string)
                 reject(new Error('Failed to create blob'));
                 return;
             }
-            const url = URL.createObjectURL(blob);
+
+            // Create blob with explicit PNG type
+            const pngBlob = new Blob([blob], { type: 'image/png' });
+            const url = URL.createObjectURL(pngBlob);
+
             const link = document.createElement('a');
-            link.download = filename;
+            link.download = pngFilename;
             link.href = url;
+            // Set type attribute for Safari
+            link.type = 'image/png';
+            // Make link visible but hidden (helps with some browsers)
+            link.style.display = 'none';
+
             // Append to body, click, then remove (required for Firefox/Safari)
             document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            // Clean up blob URL and resolve
+
+            // Use setTimeout to ensure DOM is ready
             setTimeout(() => {
-                URL.revokeObjectURL(url);
-                resolve();
-            }, 100);
+                link.click();
+
+                // Clean up after a delay
+                setTimeout(() => {
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                    resolve();
+                }, 200);
+            }, 50);
         }, 'image/png');
     });
 }
