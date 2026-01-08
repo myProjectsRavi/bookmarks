@@ -306,46 +306,38 @@ export async function sendP2PData(
 }
 
 /**
- * Encode signaling data for QR code (compressed)
+ * Encode signaling data for QR code
+ * Keep full SDP to ensure WebRTC works correctly
  */
 export function encodeForQR(data: SignalingData): string {
-    // Minimize SDP by removing unnecessary lines
     const minimalData = {
         t: data.type === 'offer' ? 'o' : 'a',
-        s: data.sdp
-            .split('\n')
-            .filter(line =>
-                line.startsWith('v=') ||
-                line.startsWith('o=') ||
-                line.startsWith('s=') ||
-                line.startsWith('c=') ||
-                line.startsWith('t=') ||
-                line.startsWith('a=group') ||
-                line.startsWith('a=fingerprint') ||
-                line.startsWith('a=ice-ufrag') ||
-                line.startsWith('a=ice-pwd') ||
-                line.startsWith('m=') ||
-                line.startsWith('a=mid') ||
-                line.startsWith('a=sctp-port') ||
-                line.startsWith('a=setup')
-            )
-            .join('\n'),
-        i: data.iceCandidates.slice(0, 3).map(c => c.candidate) // Only keep best candidates
+        s: data.sdp, // Keep FULL SDP - filtering was breaking WebRTC
+        i: data.iceCandidates.slice(0, 5) // Keep more candidates for better connectivity
     };
 
-    return btoa(JSON.stringify(minimalData));
+    const jsonStr = JSON.stringify(minimalData);
+
+    // Use simple base64 encoding
+    return btoa(unescape(encodeURIComponent(jsonStr)));
 }
 
 /**
  * Decode QR data back to signaling format
  */
 export function decodeFromQR(encoded: string): SignalingData {
-    const data = JSON.parse(atob(encoded));
-    return {
-        type: data.t === 'o' ? 'offer' : 'answer',
-        sdp: data.s,
-        iceCandidates: data.i.map((c: string) => ({ candidate: c }))
-    };
+    try {
+        const jsonStr = decodeURIComponent(escape(atob(encoded)));
+        const data = JSON.parse(jsonStr);
+        return {
+            type: data.t === 'o' ? 'offer' : 'answer',
+            sdp: data.s,
+            iceCandidates: data.i || []
+        };
+    } catch (e) {
+        console.error('Failed to decode QR data:', e);
+        throw new Error('Invalid QR data format');
+    }
 }
 
 /**
