@@ -274,6 +274,7 @@ export const BookmarkGrid: React.FC<BookmarkGridProps> = ({
   isVaultMode = false
 }) => {
   const [savingSnapshotIds, setSavingSnapshotIds] = useState<Set<string>>(new Set());
+  const [groupBy, setGroupBy] = useState<'none' | 'domain' | 'tag'>('none');
 
   // Memoize folder lookup for O(1) access
   const folderMap = useMemo(() => {
@@ -301,6 +302,50 @@ export const BookmarkGrid: React.FC<BookmarkGridProps> = ({
     }
   }, [onSaveSnapshot, savingSnapshotIds]);
 
+  // Sort: broken links first, then by date
+  const sortedBookmarks = useMemo(() => {
+    return [...bookmarks].sort((a, b) => {
+      // Broken links first
+      if (a.linkHealth === 'dead' && b.linkHealth !== 'dead') return -1;
+      if (b.linkHealth === 'dead' && a.linkHealth !== 'dead') return 1;
+      // Then by date (newest first)
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [bookmarks]);
+
+  // Group bookmarks by domain or tag
+  const groupedBookmarks = useMemo(() => {
+    if (groupBy === 'none') return null;
+
+    const groups = new Map<string, Bookmark[]>();
+
+    sortedBookmarks.forEach(bookmark => {
+      if (groupBy === 'domain') {
+        const domain = getDomain(bookmark.url);
+        if (!groups.has(domain)) groups.set(domain, []);
+        groups.get(domain)!.push(bookmark);
+      } else if (groupBy === 'tag') {
+        if (bookmark.tags && bookmark.tags.length > 0) {
+          bookmark.tags.forEach(tag => {
+            if (!groups.has(tag)) groups.set(tag, []);
+            groups.get(tag)!.push(bookmark);
+          });
+        } else {
+          if (!groups.has('Untagged')) groups.set('Untagged', []);
+          groups.get('Untagged')!.push(bookmark);
+        }
+      }
+    });
+
+    // Sort groups by size (largest first)
+    return Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length);
+  }, [sortedBookmarks, groupBy]);
+
+  // Count broken links
+  const brokenCount = useMemo(() =>
+    bookmarks.filter(b => b.linkHealth === 'dead').length
+    , [bookmarks]);
+
   // Empty state
   if (bookmarks.length === 0) {
     return (
@@ -316,25 +361,72 @@ export const BookmarkGrid: React.FC<BookmarkGridProps> = ({
     );
   }
 
+  const renderBookmarkCard = (bookmark: Bookmark) => (
+    <BookmarkCard
+      key={bookmark.id}
+      bookmark={bookmark}
+      folderName={getFolderName(bookmark.folderId)}
+      onDelete={() => onDeleteBookmark(bookmark.id)}
+      onEdit={() => onEditBookmark(bookmark)}
+      onTagClick={onTagClick}
+      onSaveSnapshot={() => handleSaveSnapshot(bookmark)}
+      onViewSnapshot={() => onViewSnapshot?.(bookmark)}
+      onMoveToVault={onMoveToVault ? () => onMoveToVault(bookmark) : undefined}
+      onShowCitation={onShowCitation ? () => onShowCitation(bookmark) : undefined}
+      isSaving={savingSnapshotIds.has(bookmark.id)}
+      isAcademic={isAcademicUrl(bookmark.url)}
+      isVaultMode={isVaultMode}
+    />
+  );
+
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-20">
-      {bookmarks.map((bookmark) => (
-        <BookmarkCard
-          key={bookmark.id}
-          bookmark={bookmark}
-          folderName={getFolderName(bookmark.folderId)}
-          onDelete={() => onDeleteBookmark(bookmark.id)}
-          onEdit={() => onEditBookmark(bookmark)}
-          onTagClick={onTagClick}
-          onSaveSnapshot={() => handleSaveSnapshot(bookmark)}
-          onViewSnapshot={() => onViewSnapshot?.(bookmark)}
-          onMoveToVault={onMoveToVault ? () => onMoveToVault(bookmark) : undefined}
-          onShowCitation={onShowCitation ? () => onShowCitation(bookmark) : undefined}
-          isSaving={savingSnapshotIds.has(bookmark.id)}
-          isAcademic={isAcademicUrl(bookmark.url)}
-          isVaultMode={isVaultMode}
-        />
-      ))}
+    <div className="space-y-4 pb-20">
+      {/* Controls Row */}
+      <div className="flex items-center justify-between bg-white rounded-lg border border-slate-200 px-4 py-2 shadow-sm">
+        <div className="flex items-center gap-2 text-sm text-slate-600">
+          {brokenCount > 0 && (
+            <span className="flex items-center gap-1.5 px-2 py-1 bg-red-50 text-red-600 rounded-lg font-medium">
+              <AlertCircle size={14} />
+              {brokenCount} broken {brokenCount === 1 ? 'link' : 'links'} at top
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500">Group by:</span>
+          <select
+            value={groupBy}
+            onChange={(e) => setGroupBy(e.target.value as 'none' | 'domain' | 'tag')}
+            className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+          >
+            <option value="none">None</option>
+            <option value="domain">Domain</option>
+            <option value="tag">Tag</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Grouped View */}
+      {groupedBookmarks ? (
+        <div className="space-y-6">
+          {groupedBookmarks.map(([groupName, groupBookmarks]) => (
+            <div key={groupName}>
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-700 mb-3 px-1">
+                {groupBy === 'domain' ? <Globe size={14} className="text-amber-500" /> : <Tag size={14} className="text-indigo-500" />}
+                {groupName}
+                <span className="text-xs text-slate-400 font-normal">({groupBookmarks.length})</span>
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {groupBookmarks.map(renderBookmarkCard)}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        /* Default Grid View */
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {sortedBookmarks.map(renderBookmarkCard)}
+        </div>
+      )}
     </div>
   );
 };
