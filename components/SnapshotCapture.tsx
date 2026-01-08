@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { FileText, Camera, Check, AlertCircle, Loader } from 'lucide-react';
-import { saveSnapshot, extractReadableContent } from '../utils/snapshots';
+import { FileText, Camera, Check, AlertCircle, Loader, Monitor, FileCode } from 'lucide-react';
+import { saveSnapshot, extractReadableContent, createRichSnapshot, supportsRichSnapshots } from '../utils/snapshots';
 
 interface SnapshotCaptureProps {
     bookmarkId: string;
@@ -21,7 +21,7 @@ export const SnapshotCapture: React.FC<SnapshotCaptureProps> = ({
     const [isProcessing, setIsProcessing] = useState(false);
     const [preview, setPreview] = useState<{ title: string; content: string; charCount: number } | null>(null);
     const [error, setError] = useState('');
-
+    const [useRichSnapshot, setUseRichSnapshot] = useState(supportsRichSnapshots()); // Default to rich if supported
     const handlePaste = (e: React.ClipboardEvent) => {
         const pasted = e.clipboardData.getData('text');
         setHtmlContent(pasted);
@@ -52,7 +52,10 @@ export const SnapshotCapture: React.FC<SnapshotCaptureProps> = ({
         setError('');
 
         try {
-            const snapshot = await saveSnapshot(bookmarkId, bookmarkUrl, htmlContent);
+            // Use rich snapshot for exact offline copy, or text-only for smaller size
+            const snapshot = useRichSnapshot
+                ? await createRichSnapshot(bookmarkId, bookmarkUrl, htmlContent)
+                : await saveSnapshot(bookmarkId, bookmarkUrl, htmlContent);
             onComplete(snapshot.id);
         } catch (e) {
             setError('Failed to save snapshot. Please try again.');
@@ -85,6 +88,38 @@ export const SnapshotCapture: React.FC<SnapshotCaptureProps> = ({
                     <li>Paste below (Ctrl+V)</li>
                 </ol>
             </div>
+
+            {/* Snapshot Mode Toggle */}
+            {supportsRichSnapshots() && (
+                <div className="flex gap-2">
+                    <button
+                        onClick={() => setUseRichSnapshot(true)}
+                        className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-lg border-2 transition-all ${useRichSnapshot
+                                ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                                : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                            }`}
+                    >
+                        <Monitor size={18} />
+                        <div className="text-left">
+                            <div className="font-medium text-sm">Rich Snapshot</div>
+                            <div className="text-xs opacity-75">Exact offline copy with images</div>
+                        </div>
+                    </button>
+                    <button
+                        onClick={() => setUseRichSnapshot(false)}
+                        className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-lg border-2 transition-all ${!useRichSnapshot
+                                ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                                : 'border-slate-200 text-slate-500 hover:border-slate-300'
+                            }`}
+                    >
+                        <FileCode size={18} />
+                        <div className="text-left">
+                            <div className="font-medium text-sm">Text Only</div>
+                            <div className="text-xs opacity-75">Smaller, faster save</div>
+                        </div>
+                    </button>
+                </div>
+            )}
 
             {/* Paste area */}
             <div>

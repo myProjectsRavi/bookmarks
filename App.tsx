@@ -1381,11 +1381,11 @@ function App() {
                         setVaultBookmarks(newVaultBookmarks);
                         // Add back to normal bookmarks
                         setBookmarks([...bookmarks, bm]);
-                        // Save updated vault to localStorage
+                        // Remove from encrypted vault storage (IndexedDB + AES-256-GCM)
                         try {
-                          localStorage.setItem('lh_vault_bookmarks', JSON.stringify(newVaultBookmarks));
+                          await ghostVault.removeFromVault('bookmarks', bm.id);
                         } catch (e) {
-                          console.error('Vault save error:', e);
+                          console.error('Vault remove error:', e);
                         }
                         showToast(`"${bm.title}" restored from Ghost Vault!`, 'success');
                       } else {
@@ -1399,9 +1399,9 @@ function App() {
                         setVaultBookmarks(newVaultBookmarks);
                         // Remove from normal bookmarks
                         setBookmarks(bookmarks.filter(b => b.id !== bm.id));
-                        // Save vault bookmarks to localStorage
+                        // Save to encrypted vault storage (IndexedDB + AES-256-GCM)
                         try {
-                          localStorage.setItem('lh_vault_bookmarks', JSON.stringify(newVaultBookmarks));
+                          await ghostVault.saveToVault('bookmarks', bm);
                         } catch (e) {
                           console.error('Vault save error:', e);
                         }
