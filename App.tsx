@@ -44,6 +44,14 @@ import {
   createVerificationCanary,
   verifyPinWithCanary
 } from './utils/crypto';
+import {
+  hideDataInImage,
+  extractDataFromImage,
+  loadImageToCanvas,
+  downloadCanvasAsPng,
+  createDefaultCarrierImage,
+  calculateCapacity
+} from './utils/steganography';
 
 // Helper to generate IDs
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -2086,6 +2094,103 @@ function App() {
           return false;
         }}
         getTimeSinceBackup={autoBackup.getTimeSinceBackup}
+        onExportToImage={async (carrierFile) => {
+          try {
+            // Prepare backup data
+            const backupData = {
+              folders,
+              bookmarks,
+              notebooks,
+              notes,
+              vaultBookmarks,
+              rules: rulesEngine.rules,
+              exportedAt: new Date().toISOString(),
+            };
+            const jsonStr = JSON.stringify(backupData);
+            const jsonBytes = new TextEncoder().encode(jsonStr);
+
+            // Encrypt the backup data
+            const backupSalt = generateSalt();
+            const backupKey = await deriveKey('linkhaven_stego_key', backupSalt);
+            const encryptedData = await encrypt(jsonStr, backupKey);
+            const encryptedBytes = new TextEncoder().encode(encryptedData);
+
+            // Combine salt + encrypted data
+            const fullData = new Uint8Array(backupSalt.length + encryptedBytes.length);
+            fullData.set(backupSalt, 0);
+            fullData.set(encryptedBytes, backupSalt.length);
+
+            // Load or create carrier image
+            let carrierCanvas: HTMLCanvasElement;
+            if (carrierFile) {
+              carrierCanvas = await loadImageToCanvas(carrierFile);
+            } else {
+              carrierCanvas = createDefaultCarrierImage(1024, 768);
+            }
+
+            // Check capacity
+            const capacity = calculateCapacity(carrierCanvas.width, carrierCanvas.height);
+            if (fullData.length > capacity) {
+              showToast(`Data too large (${Math.round(fullData.length / 1024)}KB) for image (${Math.round(capacity / 1024)}KB capacity)`, 'error');
+              return;
+            }
+
+            // Hide data in image
+            const stegoCanvas = hideDataInImage(carrierCanvas, fullData);
+            if (!stegoCanvas) {
+              showToast('Failed to create hidden backup', 'error');
+              return;
+            }
+
+            // Download the stego image
+            const filename = `linkhaven_backup_${new Date().toISOString().split('T')[0]}.png`;
+            downloadCanvasAsPng(stegoCanvas, filename);
+            showToast('Hidden backup created! Your data is inside the image.', 'success');
+          } catch (err) {
+            console.error('Steganography export error:', err);
+            showToast('Failed to create hidden backup', 'error');
+          }
+        }}
+        onImportFromImage={async (stegoFile) => {
+          try {
+            // Load the stego image
+            const stegoCanvas = await loadImageToCanvas(stegoFile);
+
+            // Extract hidden data
+            const extractedData = extractDataFromImage(stegoCanvas);
+            if (!extractedData) {
+              showToast('No hidden backup found in this image', 'error');
+              return false;
+            }
+
+            // Split salt (16 bytes) and encrypted data
+            const saltBytes = extractedData.slice(0, 16);
+            const encryptedBytes = extractedData.slice(16);
+            const encryptedStr = new TextDecoder().decode(encryptedBytes);
+
+            // Decrypt
+            const backupKey = await deriveKey('linkhaven_stego_key', saltBytes);
+            const decryptedStr = await decrypt(encryptedStr, backupKey);
+            const data = JSON.parse(decryptedStr);
+
+            // Restore data
+            setFolders(data.folders || []);
+            setBookmarks(data.bookmarks || []);
+            setNotebooks(data.notebooks || []);
+            setNotes(data.notes || []);
+            if (data.vaultBookmarks?.length > 0) {
+              setVaultBookmarks(data.vaultBookmarks);
+              localStorage.setItem('lh_vault_bookmarks', JSON.stringify(data.vaultBookmarks));
+            }
+
+            showToast(`Restored ${data.bookmarks?.length || 0} bookmarks from hidden backup!`, 'success');
+            return true;
+          } catch (err) {
+            console.error('Steganography import error:', err);
+            showToast('Failed to extract hidden backup', 'error');
+            return false;
+          }
+        }}
       />
 
     </div>
