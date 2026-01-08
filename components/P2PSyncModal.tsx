@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Wifi, Check, X, Loader, Copy, ArrowLeft, Camera, QrCode, Zap } from 'lucide-react';
+import { Wifi, Check, X, Loader, ArrowLeft, Camera, QrCode, Zap, Play, Pause } from 'lucide-react';
 import { Folder, Bookmark, Notebook, Note } from '../types';
 import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
-import Peer, { DataConnection } from 'peerjs';
+import pako from 'pako';
 
 interface P2PSyncModalProps {
     folders: Folder[];
@@ -25,25 +25,62 @@ interface P2PSyncModalProps {
 
 type SyncMode = 'select' | 'send' | 'receive';
 
-// STUN servers for better NAT traversal
-const ICE_SERVERS = {
-    iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-    ]
-};
+// QR chunk size (safe for most QR scanners)
+const CHUNK_SIZE = 1500;
+const ANIMATION_SPEED = 600; // ms per QR
 
-// Generate a short readable peer ID
-function generatePeerId(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let id = 'LH';
-    for (let i = 0; i < 6; i++) {
-        id += chars[Math.floor(Math.random() * chars.length)];
+// Compress and encode data
+function compressData(data: object): string {
+    const json = JSON.stringify(data);
+    const compressed = pako.deflate(json);
+    // Convert to base64
+    let binary = '';
+    compressed.forEach(byte => binary += String.fromCharCode(byte));
+    return btoa(binary);
+}
+
+// Decode and decompress data
+function decompressData(encoded: string): object | null {
+    try {
+        const binary = atob(encoded);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        const decompressed = pako.inflate(bytes, { to: 'string' });
+        return JSON.parse(decompressed);
+    } catch (e) {
+        console.error('Decompress error:', e);
+        return null;
     }
-    return id;
+}
+
+// Split data into QR chunks
+function createChunks(data: string): string[] {
+    const chunks: string[] = [];
+    const totalChunks = Math.ceil(data.length / CHUNK_SIZE);
+
+    for (let i = 0; i < totalChunks; i++) {
+        const chunk = data.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+        // Format: LH|chunkIndex|totalChunks|data
+        chunks.push(`LH|${i}|${totalChunks}|${chunk}`);
+    }
+
+    return chunks;
+}
+
+// Parse chunk
+function parseChunk(qrData: string): { index: number; total: number; data: string } | null {
+    if (!qrData.startsWith('LH|')) return null;
+
+    const parts = qrData.split('|');
+    if (parts.length < 4) return null;
+
+    return {
+        index: parseInt(parts[1], 10),
+        total: parseInt(parts[2], 10),
+        data: parts.slice(3).join('|') // Rejoin in case data contained |
+    };
 }
 
 export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
@@ -58,260 +95,110 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
     onError
 }) => {
     const [mode, setMode] = useState<SyncMode>('select');
-    const [peerId, setPeerId] = useState('');
-    const [qrDataUrl, setQrDataUrl] = useState('');
-    const [status, setStatus] = useState<'idle' | 'waiting' | 'connected' | 'transferring' | 'done' | 'error'>('idle');
-    const [statusMessage, setStatusMessage] = useState('');
-    const [inputCode, setInputCode] = useState('');
+
+    // Sender state
+    const [chunks, setChunks] = useState<string[]>([]);
+    const [qrDataUrls, setQrDataUrls] = useState<string[]>([]);
+    const [currentChunk, setCurrentChunk] = useState(0);
+    const [isAnimating, setIsAnimating] = useState(true);
+    const [isGenerating, setIsGenerating] = useState(false);
+
+    // Receiver state
     const [isScanning, setIsScanning] = useState(false);
-    const [progress, setProgress] = useState(0);
+    const [receivedChunks, setReceivedChunks] = useState<Map<number, string>>(new Map());
+    const [expectedTotal, setExpectedTotal] = useState(0);
+    const [scanComplete, setScanComplete] = useState(false);
 
-    const peerRef = useRef<Peer | null>(null);
-    const connectionRef = useRef<DataConnection | null>(null);
     const scannerRef = useRef<Html5Qrcode | null>(null);
-    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const animationRef = useRef<NodeJS.Timeout | null>(null);
 
+    // Cleanup
     useEffect(() => {
         return () => cleanup();
     }, []);
 
     const cleanup = () => {
-        if (timeoutRef.current) {
-            clearTimeout(timeoutRef.current);
-            timeoutRef.current = null;
+        if (animationRef.current) {
+            clearInterval(animationRef.current);
+            animationRef.current = null;
         }
         if (scannerRef.current) {
             scannerRef.current.stop().catch(() => { });
             scannerRef.current = null;
         }
-        if (connectionRef.current) {
-            connectionRef.current.close();
-            connectionRef.current = null;
+    };
+
+    // Generate QR codes for all chunks
+    const generateQRs = async () => {
+        setIsGenerating(true);
+
+        // Prepare payload
+        const payload = {
+            v: 5, // version 5 = compressed chunks
+            f: folders.map(f => ({ i: f.id, n: f.name, p: f.parentId, c: f.createdAt })),
+            b: bookmarks.map(b => ({ i: b.id, f: b.folderId, t: b.title, u: b.url, d: b.description, g: b.tags, c: b.createdAt })),
+            nb: notebooks.map(n => ({ i: n.id, n: n.name, p: n.parentId, c: n.createdAt })),
+            nt: notes.map(n => ({ i: n.id, nb: n.notebookId, t: n.title, ct: n.content, tg: n.tags, c: n.createdAt, u: n.updatedAt })),
+            vb: vaultBookmarks.map(b => ({ i: b.id, f: b.folderId, t: b.title, u: b.url, d: b.description, g: b.tags, c: b.createdAt }))
+        };
+
+        // Compress
+        const compressed = compressData(payload);
+        console.log(`Original: ~${JSON.stringify(payload).length} bytes, Compressed: ${compressed.length} bytes`);
+
+        // Create chunks
+        const dataChunks = createChunks(compressed);
+        setChunks(dataChunks);
+
+        // Generate QR for each chunk
+        const urls: string[] = [];
+        for (const chunk of dataChunks) {
+            const url = await QRCode.toDataURL(chunk, {
+                width: 300,
+                margin: 1,
+                errorCorrectionLevel: 'L',
+                color: { dark: '#1e293b', light: '#ffffff' }
+            });
+            urls.push(url);
         }
-        if (peerRef.current) {
-            peerRef.current.destroy();
-            peerRef.current = null;
+
+        setQrDataUrls(urls);
+        setIsGenerating(false);
+
+        // Start animation
+        startAnimation();
+    };
+
+    // Animate through QRs
+    const startAnimation = () => {
+        setIsAnimating(true);
+        animationRef.current = setInterval(() => {
+            setCurrentChunk(prev => (prev + 1) % chunks.length || 0);
+        }, ANIMATION_SPEED);
+    };
+
+    const toggleAnimation = () => {
+        if (isAnimating) {
+            if (animationRef.current) clearInterval(animationRef.current);
+            setIsAnimating(false);
+        } else {
+            startAnimation();
         }
     };
 
-    // SENDER: Start hosting
-    const startSender = async () => {
-        cleanup();
-        setStatus('waiting');
-        setStatusMessage('Creating connection...');
-
-        const id = generatePeerId();
-        setPeerId(id);
-
-        try {
-            const peer = new Peer(id, {
-                debug: 1,
-                config: ICE_SERVERS
-            });
-            peerRef.current = peer;
-
-            // Timeout for peer connection
-            timeoutRef.current = setTimeout(() => {
-                if (status === 'waiting' && !qrDataUrl) {
-                    setStatus('error');
-                    setStatusMessage('Connection timeout. Please try again.');
-                }
-            }, 15000);
-
-            peer.on('open', async (openedId) => {
-                if (timeoutRef.current) clearTimeout(timeoutRef.current);
-                setStatusMessage('Ready! Share this code with other device');
-
-                const qr = await QRCode.toDataURL(openedId, {
-                    width: 280,
-                    margin: 2,
-                    errorCorrectionLevel: 'M',
-                    color: { dark: '#1e293b', light: '#ffffff' }
-                });
-                setQrDataUrl(qr);
-            });
-
-            peer.on('connection', (conn) => {
-                connectionRef.current = conn;
-                setStatus('connected');
-                setStatusMessage('Device connected! Sending...');
-
-                conn.on('open', () => {
-                    const payload = {
-                        type: 'linkhaven-sync',
-                        folders,
-                        bookmarks,
-                        notebooks,
-                        notes,
-                        vaultBookmarks
-                    };
-
-                    setStatus('transferring');
-                    setProgress(50);
-                    conn.send(JSON.stringify(payload));
-                    setProgress(100);
-                    setStatus('done');
-                    setStatusMessage(`✨ Sent ${bookmarks.length} bookmarks!`);
-                });
-
-                conn.on('error', (err) => {
-                    console.error('Connection error:', err);
-                    setStatus('error');
-                    setStatusMessage('Transfer failed. Try again.');
-                });
-            });
-
-            peer.on('error', (err) => {
-                console.error('Peer error:', err);
-                if (timeoutRef.current) clearTimeout(timeoutRef.current);
-
-                if (err.type === 'unavailable-id') {
-                    // ID collision, retry
-                    setTimeout(() => startSender(), 500);
-                } else if (err.type === 'network' || err.type === 'server-error') {
-                    setStatus('error');
-                    setStatusMessage('Network error. Check your connection.');
-                } else {
-                    setStatus('error');
-                    setStatusMessage('Connection failed. Try again.');
-                }
-            });
-
-            peer.on('disconnected', () => {
-                // Try to reconnect
-                if (peerRef.current && status !== 'done') {
-                    peerRef.current.reconnect();
-                }
-            });
-
-        } catch (err) {
-            setStatus('error');
-            setStatusMessage('Failed to start. Check network.');
+    // Update animation when chunks change
+    useEffect(() => {
+        if (qrDataUrls.length > 0 && isAnimating && !animationRef.current) {
+            startAnimation();
         }
-    };
+    }, [qrDataUrls]);
 
-    // RECEIVER: Connect to sender
-    const connectToSender = (senderId: string) => {
-        let cleanId = senderId.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-        // Add LH prefix if missing
-        if (!cleanId.startsWith('LH') && cleanId.length === 6) {
-            cleanId = 'LH' + cleanId;
-        }
-
-        if (cleanId.length < 8) {
-            onError('Code must be 8 characters (e.g., LH-A7X9KP)');
-            return;
-        }
-
-        cleanup();
-        setStatus('waiting');
-        setStatusMessage('Connecting...');
-        setIsScanning(false);
-
-        // Connection timeout
-        timeoutRef.current = setTimeout(() => {
-            if (status === 'waiting') {
-                setStatus('error');
-                setStatusMessage('Connection timeout. Check the code and try again.');
-            }
-        }, 20000);
-
-        const peer = new Peer({
-            debug: 1,
-            config: ICE_SERVERS
-        });
-        peerRef.current = peer;
-
-        peer.on('open', () => {
-            setStatusMessage('Connecting to sender...');
-
-            const conn = peer.connect(cleanId, {
-                reliable: true,
-                serialization: 'json'
-            });
-            connectionRef.current = conn;
-
-            // Connection open timeout
-            const connTimeout = setTimeout(() => {
-                if (status === 'waiting') {
-                    setStatus('error');
-                    setStatusMessage('Could not reach sender. Check the code is correct.');
-                }
-            }, 15000);
-
-            conn.on('open', () => {
-                clearTimeout(connTimeout);
-                if (timeoutRef.current) clearTimeout(timeoutRef.current);
-                setStatus('connected');
-                setStatusMessage('Connected! Receiving data...');
-            });
-
-            conn.on('data', (data) => {
-                try {
-                    const payload = typeof data === 'string' ? JSON.parse(data) : data;
-
-                    if (payload.type === 'linkhaven-sync') {
-                        if (timeoutRef.current) clearTimeout(timeoutRef.current);
-                        setStatus('done');
-                        setProgress(100);
-
-                        onImport({
-                            folders: payload.folders || [],
-                            bookmarks: payload.bookmarks || [],
-                            notebooks: payload.notebooks || [],
-                            notes: payload.notes || [],
-                            vaultBookmarks: payload.vaultBookmarks || []
-                        });
-
-                        const count = payload.bookmarks?.length || 0;
-                        onSuccess(`✨ Imported ${count} bookmarks!`);
-
-                        setTimeout(() => {
-                            cleanup();
-                            onClose();
-                        }, 1500);
-                    }
-                } catch (e) {
-                    console.error('Parse error:', e);
-                    setStatus('error');
-                    setStatusMessage('Failed to parse data');
-                }
-            });
-
-            conn.on('error', (err) => {
-                console.error('Conn error:', err);
-                clearTimeout(connTimeout);
-                setStatus('error');
-                setStatusMessage('Connection dropped. Try again.');
-            });
-
-            conn.on('close', () => {
-                if (status !== 'done') {
-                    setStatus('error');
-                    setStatusMessage('Connection closed unexpectedly.');
-                }
-            });
-        });
-
-        peer.on('error', (err) => {
-            console.error('Peer error:', err);
-            if (timeoutRef.current) clearTimeout(timeoutRef.current);
-            setStatus('error');
-
-            if (err.type === 'peer-unavailable') {
-                setStatusMessage('Code not found. Make sure sender is showing the code.');
-            } else if (err.type === 'network') {
-                setStatusMessage('Network error. Check your internet connection.');
-            } else {
-                setStatusMessage(`Connection failed: ${err.type}`);
-            }
-        });
-    };
-
-    // QR Scanner
+    // Start scanning
     const startScanner = async () => {
         setIsScanning(true);
+        setReceivedChunks(new Map());
+        setExpectedTotal(0);
+        setScanComplete(false);
 
         try {
             const html5QrCode = new Html5Qrcode("qr-scanner-container");
@@ -319,11 +206,9 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
 
             await html5QrCode.start(
                 { facingMode: "environment" },
-                { fps: 10, qrbox: { width: 250, height: 250 } },
+                { fps: 15, qrbox: { width: 280, height: 280 } },
                 (decodedText) => {
-                    html5QrCode.stop().catch(() => { });
-                    setIsScanning(false);
-                    connectToSender(decodedText);
+                    handleScannedChunk(decodedText);
                 },
                 () => { }
             );
@@ -331,6 +216,81 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
             setIsScanning(false);
             onError('Camera access denied');
         }
+    };
+
+    // Handle scanned chunk
+    const handleScannedChunk = (qrData: string) => {
+        const parsed = parseChunk(qrData);
+        if (!parsed) return;
+
+        setExpectedTotal(parsed.total);
+
+        setReceivedChunks(prev => {
+            const updated = new Map(prev);
+            if (!updated.has(parsed.index)) {
+                updated.set(parsed.index, parsed.data);
+
+                // Check if complete
+                if (updated.size === parsed.total) {
+                    completeImport(updated, parsed.total);
+                }
+            }
+            return updated;
+        });
+    };
+
+    // Complete the import
+    const completeImport = async (chunks: Map<number, string>, total: number) => {
+        setScanComplete(true);
+
+        // Stop scanner
+        if (scannerRef.current) {
+            await scannerRef.current.stop().catch(() => { });
+        }
+        setIsScanning(false);
+
+        // Reassemble data
+        let fullData = '';
+        for (let i = 0; i < total; i++) {
+            fullData += chunks.get(i) || '';
+        }
+
+        // Decompress
+        const payload = decompressData(fullData) as any;
+        if (!payload || !payload.f || !payload.b) {
+            onError('Failed to decode data');
+            return;
+        }
+
+        // Convert back to full objects
+        const importData = {
+            folders: payload.f.map((f: any) => ({
+                id: f.i, name: f.n, parentId: f.p || null, createdAt: f.c
+            })),
+            bookmarks: payload.b.map((b: any) => ({
+                id: b.i, folderId: b.f, title: b.t, url: b.u,
+                description: b.d || '', tags: b.g || [], createdAt: b.c
+            })),
+            notebooks: (payload.nb || []).map((n: any) => ({
+                id: n.i, name: n.n, parentId: n.p || null, createdAt: n.c
+            })),
+            notes: (payload.nt || []).map((n: any) => ({
+                id: n.i, notebookId: n.nb, title: n.t, content: n.ct,
+                tags: n.tg || [], createdAt: n.c, updatedAt: n.u
+            })),
+            vaultBookmarks: (payload.vb || []).map((b: any) => ({
+                id: b.i, folderId: b.f, title: b.t, url: b.u,
+                description: b.d || '', tags: b.g || [], createdAt: b.c
+            }))
+        };
+
+        onImport(importData);
+        onSuccess(`✨ Imported ${importData.bookmarks.length} bookmarks!`);
+
+        setTimeout(() => {
+            cleanup();
+            onClose();
+        }, 1500);
     };
 
     const stopScanner = () => {
@@ -349,17 +309,18 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
     };
 
     const totalItems = dataStats.bookmarks + dataStats.notes + dataStats.vault;
+    const receivedCount = receivedChunks.size;
 
     return (
         <div className="space-y-5">
             {/* Header */}
             <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-cyan-500/30">
-                    <Wifi size={24} className="text-white" />
+                    <QrCode size={24} className="text-white" />
                 </div>
                 <div>
-                    <h3 className="text-lg font-bold text-slate-800">WiFi Sync</h3>
-                    <p className="text-sm text-slate-500">Direct P2P transfer</p>
+                    <h3 className="text-lg font-bold text-slate-800">QR Sync</h3>
+                    <p className="text-sm text-slate-500">Works offline • No limits</p>
                 </div>
             </div>
 
@@ -368,10 +329,10 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                 <div className="space-y-4">
                     <div className="bg-gradient-to-r from-cyan-50 to-blue-50 border border-cyan-100 rounded-lg p-4 text-sm">
                         <p className="font-medium text-cyan-800 flex items-center gap-2">
-                            <Zap size={16} /> Instant Sync
+                            <Zap size={16} /> Animated QR + Compression
                         </p>
                         <p className="text-cyan-600 mt-1">
-                            Transfer {totalItems}+ items instantly via secure peer connection.
+                            Sync {totalItems}+ items via animated QR codes. Just hold camera steady!
                         </p>
                     </div>
 
@@ -379,7 +340,7 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                         <button
                             onClick={() => {
                                 setMode('send');
-                                startSender();
+                                generateQRs();
                             }}
                             className="flex flex-col items-center gap-3 p-6 border-2 border-slate-200 rounded-xl hover:border-cyan-500 hover:bg-cyan-50/50 transition-all group"
                         >
@@ -388,12 +349,15 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                             </div>
                             <div className="text-center">
                                 <div className="font-semibold text-slate-800">Send</div>
-                                <div className="text-xs text-slate-500 mt-1">Show code</div>
+                                <div className="text-xs text-slate-500 mt-1">Show QR</div>
                             </div>
                         </button>
 
                         <button
-                            onClick={() => setMode('receive')}
+                            onClick={() => {
+                                setMode('receive');
+                                startScanner();
+                            }}
                             className="flex flex-col items-center gap-3 p-6 border-2 border-slate-200 rounded-xl hover:border-cyan-500 hover:bg-cyan-50/50 transition-all group"
                         >
                             <div className="w-14 h-14 bg-cyan-100 rounded-xl flex items-center justify-center group-hover:bg-cyan-200 transition-colors">
@@ -401,21 +365,19 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                             </div>
                             <div className="text-center">
                                 <div className="font-semibold text-slate-800">Receive</div>
-                                <div className="text-xs text-slate-500 mt-1">Enter code</div>
+                                <div className="text-xs text-slate-500 mt-1">Scan QR</div>
                             </div>
                         </button>
                     </div>
                 </div>
             )}
 
-            {/* SEND Mode */}
+            {/* SEND Mode - Animated QR */}
             {mode === 'send' && (
                 <div className="space-y-4">
-                    <div className="bg-slate-50 rounded-lg p-3 text-sm">
+                    {/* Stats */}
+                    <div className="bg-slate-50 rounded-lg p-3 text-sm flex items-center justify-between">
                         <div className="flex flex-wrap gap-2">
-                            <span className="px-2 py-1 bg-white rounded border text-xs">
-                                📁 {dataStats.folders} folders
-                            </span>
                             <span className="px-2 py-1 bg-white rounded border text-xs">
                                 🔖 {dataStats.bookmarks} bookmarks
                             </span>
@@ -425,143 +387,106 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                                 </span>
                             )}
                         </div>
+                        {qrDataUrls.length > 0 && (
+                            <span className="text-xs text-cyan-600 font-medium">
+                                {qrDataUrls.length} QR{qrDataUrls.length > 1 ? 's' : ''}
+                            </span>
+                        )}
                     </div>
 
-                    {status === 'waiting' && !qrDataUrl && (
-                        <div className="flex flex-col items-center py-8 gap-4">
+                    {isGenerating ? (
+                        <div className="flex flex-col items-center py-12 gap-4">
                             <Loader size={40} className="animate-spin text-cyan-500" />
-                            <p className="text-sm text-slate-600">{statusMessage}</p>
+                            <p className="text-sm text-slate-600">Generating QR codes...</p>
                         </div>
-                    )}
-
-                    {status === 'waiting' && qrDataUrl && (
+                    ) : qrDataUrls.length > 0 ? (
                         <div className="space-y-4">
-                            <div className="flex justify-center p-4 bg-white border-2 border-slate-200 rounded-xl">
-                                <img src={qrDataUrl} alt="Sync QR" className="w-48 h-48" />
+                            {/* QR Display */}
+                            <div className="flex justify-center p-4 bg-white border-2 border-slate-200 rounded-xl relative">
+                                <img
+                                    src={qrDataUrls[currentChunk]}
+                                    alt={`QR ${currentChunk + 1}/${qrDataUrls.length}`}
+                                    className="w-56 h-56"
+                                />
+
+                                {/* Chunk indicator */}
+                                {qrDataUrls.length > 1 && (
+                                    <div className="absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 bg-slate-800/80 text-white text-xs font-medium rounded-full">
+                                        {currentChunk + 1} / {qrDataUrls.length}
+                                    </div>
+                                )}
                             </div>
 
-                            <div className="text-center space-y-2">
-                                <div className="text-3xl font-mono font-bold text-slate-800 tracking-widest">
-                                    {peerId.slice(0, 2)}-{peerId.slice(2)}
+                            {/* Progress bar */}
+                            {qrDataUrls.length > 1 && (
+                                <div className="space-y-2">
+                                    <div className="w-full bg-slate-200 rounded-full h-1.5">
+                                        <div
+                                            className="bg-cyan-500 h-1.5 rounded-full transition-all duration-300"
+                                            style={{ width: `${((currentChunk + 1) / qrDataUrls.length) * 100}%` }}
+                                        />
+                                    </div>
+
+                                    {/* Play/Pause */}
+                                    <button
+                                        onClick={toggleAnimation}
+                                        className="w-full flex items-center justify-center gap-2 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg"
+                                    >
+                                        {isAnimating ? <Pause size={16} /> : <Play size={16} />}
+                                        {isAnimating ? 'Pause' : 'Resume'} Animation
+                                    </button>
                                 </div>
-                                <p className="text-sm text-slate-500">
-                                    Enter this code on your other device
-                                </p>
-                            </div>
+                            )}
 
-                            <button
-                                onClick={async () => {
-                                    await navigator.clipboard.writeText(peerId);
-                                    onSuccess('Code copied!');
-                                }}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg"
-                            >
-                                <Copy size={14} /> Copy Code
-                            </button>
+                            <p className="text-center text-sm text-slate-500">
+                                📱 Point other device's camera at the QR code
+                            </p>
                         </div>
-                    )}
-
-                    {(status === 'connected' || status === 'transferring') && (
-                        <div className="flex flex-col items-center py-8 gap-4">
-                            <Loader size={40} className="animate-spin text-cyan-500" />
-                            <p className="text-sm text-slate-600">{statusMessage}</p>
-                            <div className="w-full bg-slate-200 rounded-full h-2">
-                                <div className="bg-cyan-500 h-2 rounded-full transition-all" style={{ width: `${progress}%` }} />
-                            </div>
-                        </div>
-                    )}
-
-                    {status === 'done' && (
-                        <div className="flex flex-col items-center py-8 gap-4">
-                            <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center">
-                                <Check size={32} className="text-emerald-600" />
-                            </div>
-                            <p className="text-lg font-semibold text-emerald-700">{statusMessage}</p>
-                        </div>
-                    )}
-
-                    {status === 'error' && (
-                        <div className="flex flex-col items-center py-8 gap-4">
-                            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
-                                <X size={32} className="text-red-600" />
-                            </div>
-                            <p className="text-sm text-red-600 text-center">{statusMessage}</p>
-                            <button
-                                onClick={() => {
-                                    cleanup();
-                                    setStatus('idle');
-                                    setQrDataUrl('');
-                                    startSender();
-                                }}
-                                className="px-4 py-2 text-sm bg-slate-100 hover:bg-slate-200 rounded-lg"
-                            >
-                                Try Again
-                            </button>
-                        </div>
-                    )}
+                    ) : null}
                 </div>
             )}
 
-            {/* RECEIVE Mode */}
+            {/* RECEIVE Mode - Scanner */}
             {mode === 'receive' && (
                 <div className="space-y-4">
-                    {status === 'idle' && !isScanning && (
-                        <>
-                            <div className="text-sm text-slate-600 text-center mb-2">
-                                Enter the code shown on the sending device
-                            </div>
-
-                            <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    value={inputCode}
-                                    onChange={(e) => setInputCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-                                    placeholder="LHXXXXXX"
-                                    className="flex-1 px-4 py-3 text-center font-mono text-xl font-bold tracking-widest border-2 border-slate-200 rounded-lg focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 outline-none"
-                                    maxLength={8}
-                                />
-                            </div>
-
-                            <button
-                                onClick={() => connectToSender(inputCode)}
-                                disabled={inputCode.length < 8}
-                                className="w-full px-6 py-3 bg-cyan-600 text-white font-semibold rounded-lg hover:bg-cyan-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors"
-                            >
-                                Connect
-                            </button>
-
-                            <div className="flex items-center gap-2 my-4">
-                                <div className="flex-1 border-t border-slate-200"></div>
-                                <span className="text-xs text-slate-400">or scan QR</span>
-                                <div className="flex-1 border-t border-slate-200"></div>
-                            </div>
-
-                            <button
-                                onClick={startScanner}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-slate-300 text-slate-600 rounded-xl hover:border-cyan-500 hover:bg-cyan-50/50 transition-all"
-                            >
-                                <Camera size={20} /> Open Camera
-                            </button>
-                        </>
-                    )}
-
-                    {isScanning && (
+                    {isScanning && !scanComplete && (
                         <div className="space-y-4">
                             <div id="qr-scanner-container" className="w-full aspect-square bg-slate-900 rounded-xl overflow-hidden" />
-                            <button onClick={stopScanner} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg">
+
+                            {/* Progress */}
+                            {expectedTotal > 0 && (
+                                <div className="space-y-2">
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-slate-600">Receiving...</span>
+                                        <span className="font-medium text-cyan-600">
+                                            {receivedCount} / {expectedTotal}
+                                        </span>
+                                    </div>
+                                    <div className="w-full bg-slate-200 rounded-full h-2">
+                                        <div
+                                            className="bg-cyan-500 h-2 rounded-full transition-all"
+                                            style={{ width: `${(receivedCount / expectedTotal) * 100}%` }}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            {expectedTotal === 0 && (
+                                <p className="text-center text-sm text-slate-500">
+                                    📸 Hold camera steady at the QR code...
+                                </p>
+                            )}
+
+                            <button
+                                onClick={stopScanner}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg"
+                            >
                                 <X size={16} /> Cancel
                             </button>
                         </div>
                     )}
 
-                    {(status === 'waiting' || status === 'connected') && (
-                        <div className="flex flex-col items-center py-8 gap-4">
-                            <Loader size={40} className="animate-spin text-cyan-500" />
-                            <p className="text-sm text-slate-600">{statusMessage}</p>
-                        </div>
-                    )}
-
-                    {status === 'done' && (
+                    {scanComplete && (
                         <div className="flex flex-col items-center py-8 gap-4">
                             <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center">
                                 <Check size={32} className="text-emerald-600" />
@@ -570,21 +495,14 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                         </div>
                     )}
 
-                    {status === 'error' && (
+                    {!isScanning && !scanComplete && (
                         <div className="flex flex-col items-center py-8 gap-4">
-                            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center">
-                                <X size={32} className="text-red-600" />
-                            </div>
-                            <p className="text-sm text-red-600 text-center px-4">{statusMessage}</p>
                             <button
-                                onClick={() => {
-                                    cleanup();
-                                    setStatus('idle');
-                                    setInputCode('');
-                                }}
-                                className="px-4 py-2 text-sm bg-slate-100 hover:bg-slate-200 rounded-lg"
+                                onClick={startScanner}
+                                className="flex flex-col items-center gap-3 p-8 border-2 border-dashed border-slate-300 rounded-xl hover:border-cyan-500"
                             >
-                                Try Again
+                                <Camera size={48} className="text-cyan-600" />
+                                <span className="font-semibold text-slate-800">Start Camera</span>
                             </button>
                         </div>
                     )}
@@ -598,10 +516,12 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                         cleanup();
                         if (mode !== 'select') {
                             setMode('select');
-                            setStatus('idle');
-                            setQrDataUrl('');
-                            setPeerId('');
-                            setInputCode('');
+                            setChunks([]);
+                            setQrDataUrls([]);
+                            setCurrentChunk(0);
+                            setReceivedChunks(new Map());
+                            setExpectedTotal(0);
+                            setScanComplete(false);
                         } else {
                             onClose();
                         }
@@ -611,7 +531,7 @@ export const P2PSyncModal: React.FC<P2PSyncModalProps> = ({
                     <ArrowLeft size={16} />
                     {mode === 'select' ? 'Cancel' : 'Back'}
                 </button>
-                <div className="text-xs text-slate-400">P2P encrypted</div>
+                <div className="text-xs text-slate-400">100% offline</div>
             </div>
         </div>
     );
