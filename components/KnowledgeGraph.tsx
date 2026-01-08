@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import { Search, ZoomIn, ZoomOut, Maximize2, AlertCircle, Link2, FileText, Tag, Globe, HelpCircle, Sparkles, Eye, EyeOff } from 'lucide-react';
+import { Search, ZoomIn, ZoomOut, Maximize2, AlertCircle, Link2, FileText, Tag, Globe, HelpCircle, Sparkles, Eye, EyeOff, Orbit } from 'lucide-react';
 import { Bookmark, Note, GraphNode, KnowledgeGraphData } from '../types';
-import { buildKnowledgeGraph, applyForceLayout, findOrphans } from '../utils/graphBuilder';
+import { buildKnowledgeGraph, applyForceLayout, applyBarnesHutLayout, findOrphans } from '../utils/graphBuilder';
 
 interface KnowledgeGraphProps {
     bookmarks: Bookmark[];
@@ -24,13 +24,15 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
     const [filter, setFilter] = useState<'all' | 'bookmarks' | 'notes' | 'tags'>('all');
     const [searchQuery, setSearchQuery] = useState('');
     const [showAllNodes, setShowAllNodes] = useState(false); // Default: show limited nodes
+    const [galaxyMode, setGalaxyMode] = useState(false); // Use Barnes-Hut O(N log N) layout
     const NODE_LIMIT = 40; // Show top 40 most connected nodes by default
 
-    // Build and layout graph
+    // Build and layout graph - use Barnes-Hut for Galaxy Mode (better for 100+ nodes)
     const graphData = useMemo(() => {
         const raw = buildKnowledgeGraph(bookmarks, notes);
-        return applyForceLayout(raw, dimensions.width, dimensions.height, 150);
-    }, [bookmarks, notes, dimensions]);
+        const layoutFn = galaxyMode ? applyBarnesHutLayout : applyForceLayout;
+        return layoutFn(raw, dimensions.width, dimensions.height, galaxyMode ? 200 : 150);
+    }, [bookmarks, notes, dimensions, galaxyMode]);
 
     // Orphan nodes (no tags)
     const orphans = useMemo(() => findOrphans(graphData), [graphData]);
@@ -313,6 +315,19 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                             {showAllNodes ? 'Focus View' : `Show All (${graphData.nodes.length})`}
                         </button>
                     )}
+
+                    {/* Galaxy Mode - Barnes-Hut O(N log N) layout */}
+                    <button
+                        onClick={() => setGalaxyMode(!galaxyMode)}
+                        className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg transition-colors ${galaxyMode
+                            ? 'bg-purple-100 text-purple-700'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            }`}
+                        title={galaxyMode ? 'Standard layout' : 'Galaxy Mode (optimized for large graphs)'}
+                    >
+                        <Orbit size={14} />
+                        {galaxyMode ? 'Galaxy Mode ✓' : 'Galaxy Mode'}
+                    </button>
                 </div>
             </div>
 

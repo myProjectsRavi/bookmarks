@@ -172,6 +172,262 @@ export function buildKnowledgeGraph(
     return { nodes, edges };
 }
 
+// ============================================================================
+// BARNES-HUT ALGORITHM - O(N log N) force-directed layout
+// ============================================================================
+
+/**
+ * Bounding rectangle for QuadTree
+ */
+interface Rect {
+    x: number;      // Center x
+    y: number;      // Center y
+    halfW: number;  // Half width
+    halfH: number;  // Half height
+}
+
+/**
+ * QuadTree node for Barnes-Hut simulation
+ * 
+ * ALGORITHM:
+ * - Divides 2D space into quadrants recursively
+ * - Stores center of mass for each region
+ * - Approximates distant node groups as single point mass
+ * 
+ * COMPLEXITY: O(N log N) instead of O(N²)
+ * THETA: 0.5 is standard (higher = faster but less accurate)
+ */
+class QuadTree {
+    bounds: Rect;
+    centerOfMass: { x: number; y: number; mass: number } = { x: 0, y: 0, mass: 0 };
+    children: [QuadTree, QuadTree, QuadTree, QuadTree] | null = null; // NW, NE, SW, SE
+    node: { x: number; y: number; mass: number } | null = null;
+
+    constructor(bounds: Rect) {
+        this.bounds = bounds;
+    }
+
+    /**
+     * Insert a node into the quadtree
+     */
+    insert(x: number, y: number, mass: number = 1): void {
+        // Update center of mass
+        const totalMass = this.centerOfMass.mass + mass;
+        this.centerOfMass.x = (this.centerOfMass.x * this.centerOfMass.mass + x * mass) / totalMass;
+        this.centerOfMass.y = (this.centerOfMass.y * this.centerOfMass.mass + y * mass) / totalMass;
+        this.centerOfMass.mass = totalMass;
+
+        // If no node and no children, just store the node
+        if (!this.node && !this.children) {
+            this.node = { x, y, mass };
+            return;
+        }
+
+        // If has node but no children, subdivide and re-insert both
+        if (this.node && !this.children) {
+            this.subdivide();
+            const quad = this.getQuadrant(this.node.x, this.node.y);
+            this.children![quad].insert(this.node.x, this.node.y, this.node.mass);
+            this.node = null;
+        }
+
+        // Insert into appropriate quadrant
+        const quad = this.getQuadrant(x, y);
+        this.children![quad].insert(x, y, mass);
+    }
+
+    /**
+     * Subdivide into 4 quadrants
+     */
+    private subdivide(): void {
+        const { x, y, halfW, halfH } = this.bounds;
+        const qW = halfW / 2;
+        const qH = halfH / 2;
+
+        this.children = [
+            new QuadTree({ x: x - qW, y: y - qH, halfW: qW, halfH: qH }), // NW
+            new QuadTree({ x: x + qW, y: y - qH, halfW: qW, halfH: qH }), // NE
+            new QuadTree({ x: x - qW, y: y + qH, halfW: qW, halfH: qH }), // SW
+            new QuadTree({ x: x + qW, y: y + qH, halfW: qW, halfH: qH }), // SE
+        ];
+    }
+
+    /**
+     * Get quadrant index for a point
+     */
+    private getQuadrant(px: number, py: number): number {
+        const { x, y } = this.bounds;
+        if (px < x) {
+            return py < y ? 0 : 2; // NW or SW
+        } else {
+            return py < y ? 1 : 3; // NE or SE
+        }
+    }
+
+    /**
+     * Calculate repulsion force on a node using Barnes-Hut approximation
+     * 
+     * @param px - Node x position
+     * @param py - Node y position
+     * @param theta - Approximation threshold (0.5 is typical)
+     * @param repulsion - Repulsion constant
+     * @returns Force vector { fx, fy }
+     */
+    calculateForce(
+        px: number,
+        py: number,
+        theta: number = 0.5,
+        repulsion: number = 10000
+    ): { fx: number; fy: number } {
+        // Empty region
+        if (this.centerOfMass.mass === 0) {
+            return { fx: 0, fy: 0 };
+        }
+
+        const dx = this.centerOfMass.x - px;
+        const dy = this.centerOfMass.y - py;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // Avoid self-interaction
+        if (dist < 0.1) {
+            return { fx: 0, fy: 0 };
+        }
+
+        const size = this.bounds.halfW * 2;
+
+        // If far enough away, treat as single mass point (Barnes-Hut approximation)
+        if (size / dist < theta || !this.children) {
+            const force = repulsion * this.centerOfMass.mass / (dist * dist);
+            return {
+                fx: -(dx / dist) * force,
+                fy: -(dy / dist) * force
+            };
+        }
+
+        // Otherwise, recurse into children
+        let fx = 0, fy = 0;
+        for (const child of this.children) {
+            const f = child.calculateForce(px, py, theta, repulsion);
+            fx += f.fx;
+            fy += f.fy;
+        }
+
+        return { fx, fy };
+    }
+}
+
+/**
+ * Build QuadTree from nodes
+ */
+function buildQuadTree(
+    nodes: Array<{ x: number; y: number; size: number }>,
+    width: number,
+    height: number
+): QuadTree {
+    const tree = new QuadTree({
+        x: width / 2,
+        y: height / 2,
+        halfW: width / 2,
+        halfH: height / 2
+    });
+
+    for (const node of nodes) {
+        tree.insert(node.x, node.y, node.size);
+    }
+
+    return tree;
+}
+
+/**
+ * Barnes-Hut force-directed layout
+ * O(N log N) complexity for large graphs
+ */
+export function applyBarnesHutLayout(
+    data: KnowledgeGraphData,
+    width: number,
+    height: number,
+    iterations: number = 150
+): KnowledgeGraphData {
+    if (data.nodes.length === 0) return data;
+
+    const nodes = data.nodes.map(n => ({
+        ...n,
+        x: n.x ?? Math.random() * width,
+        y: n.y ?? Math.random() * height,
+        vx: 0,
+        vy: 0
+    }));
+
+    const nodeIndex = new Map(nodes.map((n, i) => [n.id, i]));
+
+    const k = Math.sqrt((width * height) / nodes.length) * 0.5;
+    const gravity = 0.08;
+    const attraction = 0.06;
+    const theta = 0.5; // Barnes-Hut approximation threshold
+
+    for (let iter = 0; iter < iterations; iter++) {
+        const temperature = Math.pow(1 - iter / iterations, 1.5);
+
+        // Build QuadTree for this iteration
+        const tree = buildQuadTree(
+            nodes.map(n => ({ x: n.x!, y: n.y!, size: n.size })),
+            width,
+            height
+        );
+
+        // Calculate repulsion using Barnes-Hut O(N log N)
+        for (const node of nodes) {
+            const { fx, fy } = tree.calculateForce(node.x!, node.y!, theta, k * k);
+            node.vx += fx * temperature;
+            node.vy += fy * temperature;
+        }
+
+        // Attraction along edges (still O(E))
+        for (const edge of data.edges) {
+            const sourceIdx = nodeIndex.get(edge.source);
+            const targetIdx = nodeIndex.get(edge.target);
+            if (sourceIdx === undefined || targetIdx === undefined) continue;
+
+            const source = nodes[sourceIdx];
+            const target = nodes[targetIdx];
+
+            const dx = target.x! - source.x!;
+            const dy = target.y! - source.y!;
+            const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+            const force = (dist - k) * attraction * edge.weight * temperature;
+
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+
+            source.vx += fx;
+            source.vy += fy;
+            target.vx -= fx;
+            target.vy -= fy;
+        }
+
+        // Gravity towards center
+        const cx = width / 2;
+        const cy = height / 2;
+        for (const node of nodes) {
+            node.vx += (cx - node.x!) * gravity * temperature;
+            node.vy += (cy - node.y!) * gravity * temperature;
+        }
+
+        // Apply velocities with damping
+        for (const node of nodes) {
+            node.x = Math.max(30, Math.min(width - 30, node.x! + node.vx));
+            node.y = Math.max(30, Math.min(height - 30, node.y! + node.vy));
+            node.vx *= 0.85;
+            node.vy *= 0.85;
+        }
+    }
+
+    return {
+        nodes: nodes.map(({ vx, vy, ...n }) => n),
+        edges: data.edges
+    };
+}
+
 /**
  * Simple force-directed layout algorithm
  * Positions nodes in 2D space based on edges

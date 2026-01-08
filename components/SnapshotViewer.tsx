@@ -10,8 +10,9 @@
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { X, ExternalLink, Clock, Printer, Moon, Sun, ChevronLeft, Archive, AlertCircle } from 'lucide-react';
+import { X, ExternalLink, Clock, Printer, Moon, Sun, ChevronLeft, Archive, AlertCircle, FileSignature } from 'lucide-react';
 import { SnapshotDB, SnapshotContent } from '../utils/SnapshotDB';
+import { createEvidence, downloadEvidence } from '../utils/notary';
 
 interface SnapshotViewerProps {
     bookmarkId: string;
@@ -74,6 +75,25 @@ export const SnapshotViewer: React.FC<SnapshotViewerProps> = ({
     const handlePrint = useCallback(() => {
         window.print();
     }, []);
+
+    // Evidence download handler - Digital Notary feature
+    const handleDownloadEvidence = useCallback(async () => {
+        if (!snapshot) return;
+
+        try {
+            // Create cryptographic evidence package
+            const evidence = await createEvidence(
+                snapshot.originalUrl,
+                snapshot.title,
+                snapshot.content
+            );
+
+            // Download as self-contained HTML
+            downloadEvidence(evidence);
+        } catch (e) {
+            console.error('Failed to create evidence:', e);
+        }
+    }, [snapshot]);
 
     // Format date
     const formatDate = (timestamp: number): string => {
@@ -138,16 +158,16 @@ export const SnapshotViewer: React.FC<SnapshotViewerProps> = ({
 
             {/* Toolbar */}
             <div className={`snapshot-toolbar sticky top-0 z-10 border-b backdrop-blur-xl ${darkMode
-                    ? 'bg-slate-900/90 border-slate-800'
-                    : 'bg-stone-50/90 border-stone-200'
+                ? 'bg-slate-900/90 border-slate-800'
+                : 'bg-stone-50/90 border-stone-200'
                 }`}>
                 <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
                     {/* Left: Back button */}
                     <button
                         onClick={onClose}
                         className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${darkMode
-                                ? 'text-slate-300 hover:bg-slate-800'
-                                : 'text-slate-600 hover:bg-stone-200'
+                            ? 'text-slate-300 hover:bg-slate-800'
+                            : 'text-slate-600 hover:bg-stone-200'
                             }`}
                     >
                         <ChevronLeft size={20} />
@@ -190,8 +210,8 @@ export const SnapshotViewer: React.FC<SnapshotViewerProps> = ({
                         <button
                             onClick={() => setDarkMode(!darkMode)}
                             className={`p-2 rounded-lg transition-colors ${darkMode
-                                    ? 'text-amber-400 hover:bg-slate-800'
-                                    : 'text-slate-600 hover:bg-stone-200'
+                                ? 'text-amber-400 hover:bg-slate-800'
+                                : 'text-slate-600 hover:bg-stone-200'
                                 }`}
                             title={darkMode ? 'Light mode' : 'Dark mode'}
                         >
@@ -202,12 +222,24 @@ export const SnapshotViewer: React.FC<SnapshotViewerProps> = ({
                         <button
                             onClick={handlePrint}
                             className={`p-2 rounded-lg transition-colors ${darkMode
-                                    ? 'text-slate-300 hover:bg-slate-800'
-                                    : 'text-slate-600 hover:bg-stone-200'
+                                ? 'text-slate-300 hover:bg-slate-800'
+                                : 'text-slate-600 hover:bg-stone-200'
                                 }`}
                             title="Print"
                         >
                             <Printer size={18} />
+                        </button>
+
+                        {/* Download as Evidence - Digital Notary */}
+                        <button
+                            onClick={handleDownloadEvidence}
+                            className={`p-2 rounded-lg transition-colors ${darkMode
+                                ? 'text-emerald-400 hover:bg-slate-800'
+                                : 'text-emerald-600 hover:bg-stone-200'
+                                }`}
+                            title="Download as cryptographic evidence (Digital Notary)"
+                        >
+                            <FileSignature size={18} />
                         </button>
 
                         {/* Open original */}
@@ -216,8 +248,8 @@ export const SnapshotViewer: React.FC<SnapshotViewerProps> = ({
                             target="_blank"
                             rel="noopener noreferrer"
                             className={`p-2 rounded-lg transition-colors ${darkMode
-                                    ? 'text-slate-300 hover:bg-slate-800'
-                                    : 'text-slate-600 hover:bg-stone-200'
+                                ? 'text-slate-300 hover:bg-slate-800'
+                                : 'text-slate-600 hover:bg-stone-200'
                                 }`}
                             title="Open original"
                         >
@@ -228,8 +260,8 @@ export const SnapshotViewer: React.FC<SnapshotViewerProps> = ({
                         <button
                             onClick={onClose}
                             className={`p-2 rounded-lg transition-colors ${darkMode
-                                    ? 'text-slate-300 hover:bg-slate-800'
-                                    : 'text-slate-600 hover:bg-stone-200'
+                                ? 'text-slate-300 hover:bg-slate-800'
+                                : 'text-slate-600 hover:bg-stone-200'
                                 }`}
                         >
                             <X size={18} />

@@ -69,6 +69,11 @@ ModalType    // Union of all modal identifiers (~25 types)
 | P2P Sync | `P2PSyncModal.tsx` | WebRTC device-to-device sync |
 | Enhanced Search | `EnhancedSearch.tsx` | MiniSearch full-text with autocomplete |
 | Folder Suggestions | `FolderSuggestions.tsx` | Naive Bayes auto-folder suggestions |
+| **Digital Notary** | `utils/notary.ts` | Cryptographic evidence files with Merkle proofs |
+| **QR Stream Sync** | `AnimatedQRSync.tsx` | Air-gapped animated QR transfer |
+| **Galaxy Mode** | `KnowledgeGraph.tsx` | Barnes-Hut O(N log N) layout |
+| **Shadow Snapshots** | `SnapshotHistoryDB.ts` | Versioned snapshots with TimeLock seals |
+| **Privacy-First Page** | `PrivacyFirstPage.tsx` | EU marketing landing page |
 
 ---
 
