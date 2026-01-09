@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { Search, ZoomIn, ZoomOut, Maximize2, AlertCircle, Link2, FileText, Tag, Globe, HelpCircle, Sparkles, Eye, EyeOff, Orbit } from 'lucide-react';
 import { Bookmark, Note, GraphNode, KnowledgeGraphData } from '../types';
-import { buildKnowledgeGraph, applyForceLayout, applyBarnesHutLayout, findOrphans } from '../utils/graphBuilder';
+import { buildKnowledgeGraph, applyForceLayout, findOrphans } from '../utils/graphBuilder';
 
 interface KnowledgeGraphProps {
     bookmarks: Bookmark[];
@@ -27,18 +27,14 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
     const [galaxyMode, setGalaxyMode] = useState(false); // Use Barnes-Hut O(N log N) layout
     const NODE_LIMIT = 40; // Show top 40 most connected nodes by default
 
-    // Build and layout graph - use Barnes-Hut for Galaxy Mode (better for 100+ nodes)
+    // Build and layout graph
+    // Galaxy Mode: more iterations, spread-out layout for visualizing large graphs
     const graphData = useMemo(() => {
         const raw = buildKnowledgeGraph(bookmarks, notes);
-        // Clear any existing positions to force fresh layout calculation
-        const resetGraph = {
-            nodes: raw.nodes.map(n => ({ ...n, x: undefined, y: undefined })),
-            edges: raw.edges
-        };
-        const layoutFn = galaxyMode ? applyBarnesHutLayout : applyForceLayout;
-        // Galaxy mode: 60 iterations (converges faster with Barnes-Hut)
-        // Standard mode: 100 iterations  
-        return layoutFn(resetGraph, dimensions.width, dimensions.height, galaxyMode ? 60 : 100);
+        // Always use force layout but with different iteration counts
+        // Galaxy mode uses more iterations for a more refined layout
+        const iterations = galaxyMode ? 120 : 80;
+        return applyForceLayout(raw, dimensions.width, dimensions.height, iterations);
     }, [bookmarks, notes, dimensions, galaxyMode]);
 
     // Orphan nodes (no tags)
