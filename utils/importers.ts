@@ -6,6 +6,16 @@ import { Folder, Bookmark } from '../types';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
+// Validate URL scheme for security (prevent XSS via javascript: links)
+const isValidUrl = (url: string): boolean => {
+    try {
+        const lower = url.trim().toLowerCase();
+        return lower.startsWith('http://') || lower.startsWith('https://');
+    } catch {
+        return false;
+    }
+};
+
 interface ParseResult {
     folders: Folder[];
     bookmarks: Bookmark[];
@@ -55,7 +65,7 @@ export function parseBookmarksHTML(html: string): ParseResult {
             } else if (a) {
                 // This is a bookmark
                 const href = a.getAttribute('href');
-                if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+                if (href && isValidUrl(href)) {
                     const bookmark: Bookmark = {
                         id: generateId(),
                         folderId: currentFolderId || 'default',
@@ -108,15 +118,18 @@ export function parsePocketExport(data: unknown): Bookmark[] {
             Object.values(items as Record<string, unknown>).forEach((item: unknown) => {
                 const i = item as Record<string, unknown>;
                 if (i.resolved_url || i.given_url) {
-                    bookmarks.push({
-                        id: generateId(),
-                        folderId: 'pocket-import',
-                        title: (i.resolved_title || i.given_title || '') as string,
-                        url: (i.resolved_url || i.given_url) as string,
-                        description: (i.excerpt || '') as string,
-                        tags: Array.isArray(i.tags) ? i.tags.map((t: unknown) => String(t)) : [],
-                        createdAt: i.time_added ? parseInt(i.time_added as string) * 1000 : Date.now()
-                    });
+                    const url = (i.resolved_url || i.given_url) as string;
+                    if (isValidUrl(url)) {
+                        bookmarks.push({
+                            id: generateId(),
+                            folderId: 'pocket-import',
+                            title: (i.resolved_title || i.given_title || '') as string,
+                            url: url,
+                            description: (i.excerpt || '') as string,
+                            tags: Array.isArray(i.tags) ? i.tags.map((t: unknown) => String(t)) : [],
+                            createdAt: i.time_added ? parseInt(i.time_added as string) * 1000 : Date.now()
+                        });
+                    }
                 }
             });
         }
@@ -143,7 +156,7 @@ export function parseRaindropExport(data: unknown): ParseResult {
 
             items.forEach((item: unknown) => {
                 const i = item as Record<string, unknown>;
-                if (i.link) {
+                if (i.link && isValidUrl(i.link as string)) {
                     // Handle collection/folder
                     const collectionId = (i.collection as Record<string, unknown>)?.$id as number;
                     let folderId = 'raindrop-import';
@@ -209,10 +222,12 @@ export function parseImportFile(content: string, filename: string): ParseResult 
             if (json.folders && json.bookmarks) {
                 return {
                     folders: json.folders,
-                    bookmarks: json.bookmarks.map((b: Bookmark) => ({
-                        ...b,
-                        tags: b.tags || []
-                    }))
+                    bookmarks: json.bookmarks
+                        .filter((b: Bookmark) => isValidUrl(b.url))
+                        .map((b: Bookmark) => ({
+                            ...b,
+                            tags: b.tags || []
+                        }))
                 };
             }
 
